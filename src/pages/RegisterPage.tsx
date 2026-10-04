@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { signInWithGoogle } from '../services/firebase';
-import { getErrorMessage, normalizeError, isObjectLikeString } from '../utils/errorHelper';
-import { Shield, AlertCircle, CheckCircle2, ArrowRight, UserPlus, Lock, Mail, User, Copy, ExternalLink } from 'lucide-react';
+import { getErrorMessage, normalizeError } from '../utils/errorHelper';
+import { AlertCircle, UserPlus, Lock, Mail, User, Copy, ExternalLink, CheckCircle2 } from 'lucide-react';
 
 interface RegisterPageProps {
   onNavigate: (path: string) => void;
@@ -18,9 +18,6 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
   const [role, setRole] = useState<'CUSTOMER' | 'PROVIDER'>('CUSTOMER');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRedirecting, setIsRedirecting] = useState(() => {
-    return typeof window !== 'undefined' && sessionStorage.getItem('queueless_google_redirect_in_progress') === '1';
-  });
   const [localError, setLocalError] = useState<string | null>(null);
   const [isDomainError, setIsDomainError] = useState(false);
   const [copiedDomain, setCopiedDomain] = useState(false);
@@ -40,6 +37,19 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
     setLocalError(null);
     setIsDomainError(false);
 
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+
+    if (!trimmedName || trimmedName.length < 2) {
+      setLocalError('Please enter your full name (minimum 2 characters).');
+      return;
+    }
+
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      setLocalError('Please enter a valid email address.');
+      return;
+    }
+
     if (password !== confirmPassword) {
       setLocalError('Passwords do not match. Please verify your password.');
       return;
@@ -53,14 +63,14 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
     setIsSubmitting(true);
     try {
       await registerWithPassword({
-        name,
-        email,
+        name: trimmedName,
+        email: trimmedEmail,
         password,
         role,
       });
       onNavigate(redirectTo);
     } catch (err: any) {
-      setLocalError(getErrorMessage(err, 'Registration failed. Please try again.'));
+      setLocalError(getErrorMessage(err, 'Unable to create account. Please check your details and try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -75,7 +85,6 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
     try {
       const googleResult = await signInWithGoogle();
       if (!googleResult?.idToken) {
-        // If redirect flow initiated, browser will navigate
         return;
       }
       await loginWithGoogle(googleResult.idToken, role);
@@ -99,35 +108,13 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
     }
   };
 
-  const copyDomainToClipboard = () => {
+  const copyDomain = () => {
     navigator.clipboard.writeText(currentHostname);
     setCopiedDomain(true);
     setTimeout(() => setCopiedDomain(false), 3000);
   };
 
-  // Robust detection of current error and whether it is a Firebase unauthorized domain issue
-  const activeRawError = authError || localError;
-  const normalizedError = activeRawError
-    ? normalizeError(activeRawError, 'Unable to complete registration. Please try again.')
-    : null;
-
-  const rawCode = (activeRawError as any)?.code || normalizedError?.code || '';
-  const rawMessage = (activeRawError as any)?.message || normalizedError?.message || '';
-
-  const isUnauthorizedDomain =
-    isDomainError ||
-    rawCode === 'auth/unauthorized-domain' ||
-    String(rawCode).includes('unauthorized-domain') ||
-    String(rawMessage).toLowerCase().includes('unauthorized-domain') ||
-    String(rawMessage).toLowerCase().includes('authorized domain') ||
-    String(rawMessage).toLowerCase().includes('not authorized in firebase console');
-
-  // Safely extract the active error string to prevent any [object Object]
-  const safeErrorMessage = normalizedError
-    ? (isObjectLikeString(normalizedError.message)
-        ? 'Unable to complete registration. Please try again.'
-        : normalizedError.message)
-    : null;
+  const displayedError = localError || (authError ? getErrorMessage(authError, 'Unable to complete registration.') : null);
 
   return (
     <div className="min-h-[85vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-slate-50">
@@ -137,83 +124,69 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
           <div className="w-12 h-12 rounded-xl bg-slate-900 text-teal-400 mx-auto flex items-center justify-center font-bold text-xl shadow-md">
             Q
           </div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Create your QueueLess Account</h2>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Create your Account</h2>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Reserve your digital turn and manage real-time queues with a secure personal profile.
+            Sign up to reserve turns, track your position in line, and manage queues in real time.
           </p>
         </div>
 
-        {/* Mobile Redirect In-Progress Banner */}
-        {isRedirecting && (
-          <div className="p-3.5 rounded-xl bg-teal-50 border border-teal-200 text-center space-y-1.5 animate-pulse">
-            <div className="w-5 h-5 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="text-xs font-semibold text-teal-900">
-              Completing Google registration...
-            </p>
-            <p className="text-[11px] text-teal-700">Establishing your authenticated session.</p>
-          </div>
-        )}
-
-        {/* Domain Authorization Notice Banner */}
-        {isUnauthorizedDomain && (
+        {/* Domain Authorization Notice for project queue-69233 */}
+        {isDomainError && (
           <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2.5">
             <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div className="flex-1">
-                <strong className="block font-semibold">Firebase Domain Authorization Required</strong>
-                <p className="mt-0.5 text-[11px] text-amber-800">
-                  Firebase requires you to whitelist your web app domain before Google sign-in is permitted.
+                <strong className="block font-semibold text-amber-900">Firebase Domain Authorization Required</strong>
+                <p className="mt-0.5 text-amber-800 text-[11px] leading-relaxed">
+                  Your Firebase project <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-[11px]">queue-69233</code> needs this hosting domain added to allow Google Sign-In.
                 </p>
               </div>
             </div>
 
-            <div className="bg-white p-2.5 rounded-lg border border-amber-200 space-y-1.5">
-              <div className="text-[11px] font-semibold text-slate-600">Your App Domain:</div>
-              <div className="flex items-center gap-2">
-                <code className="text-[11px] font-mono bg-slate-100 px-2 py-1 rounded flex-1 truncate text-slate-800 border border-slate-200">
-                  {currentHostname}
-                </code>
+            <div className="bg-white/80 p-2.5 rounded-lg border border-amber-200 space-y-1.5">
+              <span className="text-[10px] font-medium text-amber-700 uppercase tracking-wider block">Your App Domain</span>
+              <div className="flex items-center gap-1.5 font-mono text-[11px] text-slate-800 bg-slate-100 p-1.5 rounded select-all break-all">
+                <span className="flex-1">{currentHostname}</span>
                 <button
                   type="button"
-                  onClick={copyDomainToClipboard}
-                  className="px-2.5 py-1 text-[11px] font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded flex items-center gap-1 transition-colors shrink-0"
+                  onClick={copyDomain}
+                  className="px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded text-[10px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
                 >
-                  {copiedDomain ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedDomain ? 'Copied!' : 'Copy Domain'}</span>
+                  {copiedDomain ? <CheckCircle2 className="w-3 h-3 text-emerald-700" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedDomain ? 'Copied' : 'Copy'}</span>
                 </button>
               </div>
             </div>
 
             <div className="text-[11px] text-amber-800 space-y-1">
-              <p><strong>To enable Google Sign-In:</strong></p>
+              <p><strong>To authorize Google Sign-In:</strong></p>
               <ol className="list-decimal pl-4 space-y-0.5 text-[11px]">
-                <li>Go to <a href="https://console.firebase.google.com/project/queueless-bc767/authentication/settings" target="_blank" rel="noopener noreferrer" className="underline font-semibold text-amber-900 inline-flex items-center gap-0.5">Firebase Console &rarr; Auth Settings <ExternalLink className="w-2.5 h-2.5" /></a></li>
+                <li>Open <a href="https://console.firebase.google.com/project/queue-69233/authentication/settings" target="_blank" rel="noopener noreferrer" className="underline font-semibold text-amber-900 inline-flex items-center gap-0.5">Firebase Console &rarr; Auth Settings <ExternalLink className="w-2.5 h-2.5" /></a></li>
                 <li>Click <strong>Authorized Domains</strong> &rarr; <strong>Add domain</strong></li>
-                <li>Paste the copied domain and click Save.</li>
+                <li>Paste <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">{currentHostname}</code> and save.</li>
               </ol>
             </div>
 
             <div className="p-2 rounded bg-amber-100/70 border border-amber-300 text-[11px] text-amber-950 font-medium">
-              💡 <strong>Instant Alternative:</strong> You can register immediately using the <strong>Email & Password</strong> form below without waiting for Firebase domain approval!
+              💡 <strong>Instant Sign-Up:</strong> You can register right now using the <strong>Email & Password</strong> form below!
             </div>
           </div>
         )}
 
-        {/* Standard Error Banner */}
-        {safeErrorMessage && !isUnauthorizedDomain && (
+        {/* Error Banner */}
+        {displayedError && !isDomainError && (
           <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
             <div className="flex-1 whitespace-pre-line space-y-1">
-              <span className="font-medium text-red-800">{safeErrorMessage}</span>
-              {safeErrorMessage.toLowerCase().includes('already exists') && (
+              <span className="font-medium text-red-800">{displayedError}</span>
+              {displayedError.toLowerCase().includes('already exists') && (
                 <div className="pt-1">
                   <button
                     type="button"
                     onClick={() => onNavigate(`/login?redirect=${encodeURIComponent(redirectTo)}`)}
                     className="text-xs font-bold text-teal-700 underline hover:text-teal-900 inline-flex items-center gap-1"
                   >
-                    <span>Click here to Sign In instead</span>
-                    <ArrowRight className="w-3 h-3" />
+                    <span>Click here to Sign In</span>
                   </button>
                 </div>
               )}
@@ -233,8 +206,11 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
                 type="text"
                 required
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Dr. Rajesh Kumar or Priya Sharma"
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (displayedError) setLocalError(null);
+                }}
+                placeholder="e.g. Akash Thakare"
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
               />
             </div>
@@ -250,8 +226,11 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
                 type="email"
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@organization.com"
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (displayedError) setLocalError(null);
+                }}
+                placeholder="you@example.com"
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
               />
             </div>
@@ -268,8 +247,11 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
                 required
                 minLength={6}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="•••••••• (min. 6 characters)"
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (displayedError) setLocalError(null);
+                }}
+                placeholder="•••••••• (at least 6 characters)"
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none font-mono"
               />
             </div>
@@ -286,7 +268,10 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
                 required
                 minLength={6}
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  if (displayedError) setLocalError(null);
+                }}
                 placeholder="••••••••"
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none font-mono"
               />
@@ -295,28 +280,28 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Account Role / Purpose
+              Account Role
             </label>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => setRole('CUSTOMER')}
-                className={`py-2 px-3 rounded-lg border text-left transition-colors ${
+                className={`py-2 px-3 rounded-lg border text-left transition-colors cursor-pointer ${
                   role === 'CUSTOMER'
-                    ? 'border-teal-600 bg-teal-50/60 text-teal-900 font-semibold shadow-xs'
+                    ? 'border-teal-600 bg-teal-50/60 text-teal-900 font-semibold shadow-xs ring-1 ring-teal-500'
                     : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
                 <span className="block font-bold">Customer</span>
-                <span className="text-[10px] text-slate-500 block leading-tight">Join and track queues</span>
+                <span className="text-[10px] text-slate-500 block leading-tight">Join queues & get tokens</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setRole('PROVIDER')}
-                className={`py-2 px-3 rounded-lg border text-left transition-colors ${
+                className={`py-2 px-3 rounded-lg border text-left transition-colors cursor-pointer ${
                   role === 'PROVIDER'
-                    ? 'border-teal-600 bg-teal-50/60 text-teal-900 font-semibold shadow-xs'
+                    ? 'border-teal-600 bg-teal-50/60 text-teal-900 font-semibold shadow-xs ring-1 ring-teal-500'
                     : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
@@ -329,14 +314,14 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-60"
+            className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-60 cursor-pointer mt-2"
           >
             {isSubmitting ? (
               <span>Creating Account...</span>
             ) : (
               <>
                 <UserPlus className="w-4 h-4" />
-                <span>Create Secure Account (Instant)</span>
+                <span>Create Account</span>
               </>
             )}
           </button>
@@ -352,7 +337,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
           </div>
         </div>
 
-        {/* Google Sign-Up Option */}
+        {/* Google Sign-Up Option using queue-69233 */}
         <button
           type="button"
           onClick={handleGoogleSignUp}
@@ -381,13 +366,13 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
         </button>
 
         {/* Existing Account Link */}
-        <div className="pt-2 text-center border-t border-slate-100">
+        <div className="pt-4 text-center border-t border-slate-100">
           <p className="text-xs text-slate-600">
             Already have an account?{' '}
             <button
               type="button"
               onClick={() => onNavigate(`/login?redirect=${encodeURIComponent(redirectTo)}`)}
-              className="text-teal-600 font-semibold hover:underline"
+              className="text-teal-600 font-semibold hover:underline cursor-pointer"
             >
               Sign In here
             </button>

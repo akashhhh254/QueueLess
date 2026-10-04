@@ -55,7 +55,7 @@ export class AuthService {
 
     // 2. Try Google Firebase Identity Toolkit API
     try {
-      const apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "AIzaSyBuj0JQ-EPz-05gbq6VEi9dZu5Pwiq5UZ0";
+      const apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "AIzaSyAR-kukfNbGB2ZiB8mO5jExcnwFShrBm3U";
       const fbResponse = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

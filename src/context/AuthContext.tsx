@@ -1,33 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
-import { auth, signOutFromFirebase, checkRedirectAuthResult } from '../services/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
 import { getErrorMessage } from '../utils/errorHelper';
+import {
+  signUpWithFirebaseEmail,
+  signInWithFirebaseEmail,
+  sendFirebasePasswordReset,
+  signOutFromFirebase,
+} from '../services/firebase';
 
 const SESSION_STORAGE_KEY = 'queueless_session_token';
 
 /**
  * Safe fetch wrapper that automatically attaches the Bearer token for /api requests.
- * Uses the fresh session token or Firebase Auth ID token.
- * Does NOT mutate the read-only window.fetch getter, ensuring full compatibility across all browsers & iframes.
+ * Uses the active session token stored in localStorage or cookies.
  */
 export const apiFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  let token = typeof window !== 'undefined' ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
-
-  // If Firebase has an active user and no local token is present, get an ID token
-  if (!token && auth?.currentUser) {
-    try {
-      const fbToken = await auth.currentUser.getIdToken();
-      if (fbToken) {
-        token = fbToken;
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(SESSION_STORAGE_KEY, fbToken);
-        }
-      }
-    } catch {
-      // Fall back
-    }
-  }
+  const token = typeof window !== 'undefined' ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
 
   const requestInit = { ...(init || {}) };
   const headers = new Headers(requestInit.headers || {});
@@ -133,46 +121,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     let isMounted = true;
 
-    // Check for mobile Google redirect login result on mount
-    const checkRedirect = async () => {
-      try {
-        const redirectUser = await checkRedirectAuthResult();
-        if (redirectUser?.idToken && isMounted) {
-          await loginWithGoogle(redirectUser.idToken);
-        }
-      } catch (err: any) {
-        // Cleanly log without polluting user error banner on initial mount
-        console.warn('[QueueLess] Redirect check on mount:', err);
-      }
-    };
-    checkRedirect();
-
-    // Listen to Firebase Auth state for seamless persistence
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      if (!isMounted) return;
-
-      if (fbUser) {
-        try {
-          const idToken = await fbUser.getIdToken();
-          // Synchronize with backend SQLite user record via deduplicated helper
-          const syncedUser = await performBackendGoogleAuth(idToken);
-          if (syncedUser && isMounted) {
-            setUser(syncedUser);
-          }
-        } catch (err) {
-          console.error('Failed to sync Firebase auth state:', err);
-        } finally {
-          if (isMounted) setLoading(false);
-        }
-      } else {
-        // Fallback to SQLite cookie/token session check
-        fetchAuthStatus();
-      }
-    });
+    // Check user session status on initial load from server
+    fetchAuthStatus();
 
     return () => {
       isMounted = false;
-      unsubscribe();
     };
   }, []);
 
@@ -224,7 +177,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     role?: 'CUSTOMER' | 'PROVIDER';
   }): Promise<User> => {
     setAuthError(null);
+    let firebaseIdToken: string | null = null;
+
+    // 1. Create real user in Firebase Authentication
     try {
+      const fbResult = await signUpWithFirebaseEmail(params.name, params.email, params.password);
+      firebaseIdToken = fbResult.idToken;
+    } catch (fbErr: any) {
+      console.warn('[QueueLess Auth] Firebase signup note:', fbErr?.message || fbErr);
+      // If project has not toggled Email/Password in console, allow local creation
+      if (fbErr?.message?.includes('Firebase Email/Password provider is not enabled')) {
+        // Fall back to local creation
+      } else {
+        const msg = getErrorMessage(fbErr, 'Registration failed in Firebase. Please try again.');
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+    }
+
+    // 2. Sync user profile with app session
+    try {
+      if (firebaseIdToken) {
+        return await performBackendGoogleAuth(firebaseIdToken, params.role);
+      }
+
+      // Local database registration fallback
       const res = await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -246,6 +223,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const loginWithPassword = async (email: string, password: string): Promise<User> => {
     setAuthError(null);
+
+    // 1. Authenticate with Firebase Authentication first
+    try {
+      const fbResult = await signInWithFirebaseEmail(email, password);
+      if (fbResult.idToken) {
+        const user = await performBackendGoogleAuth(fbResult.idToken);
+        return user;
+      }
+    } catch (fbErr: any) {
+      console.warn('[QueueLess Auth] Firebase login note:', fbErr?.message || fbErr);
+    }
+
+    // 2. Check local database
     try {
       const res = await apiFetch('/api/auth/login-password', {
         method: 'POST',
@@ -268,6 +258,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const resetPassword = async (email: string, newPassword: string): Promise<User> => {
     setAuthError(null);
+
+    // 1. Send Firebase password reset email
+    try {
+      await sendFirebasePasswordReset(email);
+    } catch (fbErr) {
+      console.warn('[QueueLess Auth] Firebase password reset note:', fbErr);
+    }
+
+    // 2. Update local database
     try {
       const res = await apiFetch('/api/auth/reset-password', {
         method: 'POST',
@@ -291,10 +290,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const logout = async () => {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
-      await signOutFromFirebase();
     } catch {
       // ignore
     } finally {
+      await signOutFromFirebase();
       localStorage.removeItem(SESSION_STORAGE_KEY);
       sessionStorage.removeItem('queueless_google_redirect_in_progress');
       setUser(null);
