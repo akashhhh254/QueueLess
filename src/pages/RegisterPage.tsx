@@ -161,9 +161,21 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
         {(authError || localError) && !isDomainError && (
           <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
-            <div className="flex-1 whitespace-pre-line">
+            <div className="flex-1 whitespace-pre-line space-y-1">
               <strong className="block font-semibold">Registration Notice</strong>
               <span>{authError || localError}</span>
+              {(authError || localError)?.toLowerCase().includes('already exists') && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onNavigate(`/login?redirect=${encodeURIComponent(redirectTo)}`)}
+                    className="text-xs font-bold text-teal-700 underline hover:text-teal-900 inline-flex items-center gap-1"
+                  >
+                    <span>Click here to Sign In instead</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

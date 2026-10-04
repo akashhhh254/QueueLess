@@ -55,18 +55,19 @@ apiRouter.get('/auth/me', (req: AuthenticatedRequest, res: Response) => {
 
 apiRouter.post('/auth/register', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role } = req.body || {};
     const { user, sessionToken } = await AuthService.registerWithPassword({
-      name,
-      email,
-      password,
+      name: name || '',
+      email: email || '',
+      password: password || '',
       role: role === 'PROVIDER' ? 'PROVIDER' : 'CUSTOMER',
     });
 
+    const isSecure = req.secure || process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('queueless_session', sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
@@ -86,13 +87,14 @@ apiRouter.post('/auth/register', async (req: AuthenticatedRequest, res: Response
 
 apiRouter.post('/auth/login-password', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { email, password } = req.body;
-    const { user, sessionToken } = await AuthService.loginWithPassword(email, password);
+    const { email, password } = req.body || {};
+    const { user, sessionToken } = await AuthService.loginWithPassword(email || '', password || '');
 
+    const isSecure = req.secure || process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('queueless_session', sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
@@ -110,6 +112,33 @@ apiRouter.post('/auth/login-password', async (req: AuthenticatedRequest, res: Re
   }
 });
 
+apiRouter.post('/auth/reset-password', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, newPassword } = req.body || {};
+    const { user, sessionToken } = await AuthService.resetPassword(email || '', newPassword || '');
+
+    const isSecure = req.secure || process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
+    res.cookie('queueless_session', sessionToken, {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    res.json({
+      success: true,
+      user,
+      sessionToken,
+      message: `Password updated successfully! Welcome, ${user.name}.`,
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      error: 'Password Reset Failed',
+      message: err.message || 'Unable to reset password.',
+    });
+  }
+});
+
 apiRouter.post('/auth/google', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { credential } = req.body;
@@ -123,12 +152,12 @@ apiRouter.post('/auth/google', async (req: AuthenticatedRequest, res: Response) 
     // Save/Find user and create session
     const { user, sessionToken } = await AuthService.authenticateGoogleUser(verified);
 
-    // Set secure HTTP-only cookie
+    const isSecure = req.secure || process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('queueless_session', sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
     res.json({

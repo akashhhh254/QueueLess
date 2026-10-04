@@ -284,6 +284,65 @@ export class AuthService {
   }
 
   /**
+   * Resets the user's password securely and returns a new session.
+   */
+  static async resetPassword(email: string, newPassword: string): Promise<{ user: UserRecord; sessionToken: string }> {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail || !newPassword) {
+      throw new Error('Please enter both your registered email and new password.');
+    }
+    if (newPassword.length < 6) {
+      throw new Error('New password must be at least 6 characters long.');
+    }
+
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail) as UserRecord | undefined;
+    if (!user) {
+      throw new Error('No account found with this email address. Please register.');
+    }
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = this.hashPassword(newPassword, salt);
+
+    db.prepare(`
+      UPDATE users 
+      SET password_hash = ?, password_salt = ?, updated_at = ?
+      WHERE id = ?
+    `).run(passwordHash, salt, now, user.id);
+
+    // Create session
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const sessionId = `ses_${crypto.randomUUID().slice(0, 8)}`;
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    db.prepare(`
+      INSERT INTO sessions (id, user_id, token, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, user.id, sessionToken, expiresAt, now);
+
+    // Audit log
+    db.prepare(`
+      INSERT INTO audit_logs (id, actor_user_id, action, entity_type, entity_id, metadata, created_at)
+      VALUES (?, ?, 'USER_PASSWORD_RESET', 'users', ?, ?, ?)
+    `).run(`audit_${crypto.randomUUID().slice(0, 8)}`, user.id, user.id, JSON.stringify({ email: user.email }), now);
+
+    const safeUser = {
+      id: user.id,
+      google_id: user.google_id,
+      name: user.name,
+      email: user.email,
+      profile_image: user.profile_image,
+      role: user.role,
+      created_at: user.created_at,
+      updated_at: now,
+    };
+
+    return { user: safeUser as UserRecord, sessionToken };
+  }
+
+  /**
    * Express middleware to validate session from cookies or Bearer header.
    */
   static authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction) {

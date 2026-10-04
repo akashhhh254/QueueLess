@@ -34,6 +34,11 @@ async function startServer() {
   // Mount API endpoints
   app.use('/api', apiRouter);
 
+  // Catch-all 404 for API routes so they NEVER fall through to HTML/Vite middlewares
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: 'Endpoint not found', path: req.originalUrl });
+  });
+
   // Direct health check
   app.get('/health', (req, res) => {
     res.json({

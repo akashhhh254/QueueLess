@@ -2,6 +2,43 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User } from '../types';
 import { signOutFromFirebase } from '../services/firebase';
 
+const SESSION_STORAGE_KEY = 'queueless_session_token';
+
+/**
+ * Safe fetch wrapper that automatically attaches the Bearer token for /api requests.
+ * Does NOT mutate the read-only window.fetch getter, ensuring full compatibility across all browsers & iframes.
+ */
+export const apiFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const token = typeof window !== 'undefined' ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
+  const requestInit = { ...(init || {}) };
+  const headers = new Headers(requestInit.headers || {});
+
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  requestInit.headers = headers;
+
+  return fetch(input, requestInit);
+};
+
+async function safeParseResponse(res: Response): Promise<any> {
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    if (!res.ok) {
+      throw new Error(`Server temporarily unavailable (${res.status}). Please try again in a few moments.`);
+    }
+    throw new Error('Unexpected response received from server.');
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.message || data?.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -13,6 +50,7 @@ interface AuthContextType {
   loginWithGoogle: (credential: string) => Promise<User>;
   registerWithPassword: (params: { name: string; email: string; password: string; role?: 'CUSTOMER' | 'PROVIDER' }) => Promise<User>;
   loginWithPassword: (email: string, password: string) => Promise<User>;
+  resetPassword: (email: string, newPassword: string) => Promise<User>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   saveCustomClientId: (id: string) => Promise<void>;
@@ -39,17 +77,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fetchAuthStatus = async () => {
     try {
       // 1. Fetch Google Client configuration status
-      const configRes = await fetch('/api/auth/config');
+      const configRes = await apiFetch('/api/auth/config');
       if (configRes.ok) {
-        const configData = await configRes.json();
-        setGoogleConfig(configData);
+        try {
+          const configData = await configRes.json();
+          setGoogleConfig(configData);
+        } catch {}
       }
 
       // 2. Fetch authenticated session
-      const meRes = await fetch('/api/auth/me');
+      const meRes = await apiFetch('/api/auth/me');
       if (meRes.ok) {
-        const meData = await meRes.json();
-        setUser(meData.user || null);
+        try {
+          const meData = await meRes.json();
+          setUser(meData.user || null);
+        } catch {
+          setUser(null);
+        }
       } else {
         setUser(null);
       }
@@ -67,17 +111,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loginWithGoogle = async (credential: string): Promise<User> => {
     setAuthError(null);
     try {
-      const res = await fetch('/api/auth/google', {
+      const res = await apiFetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || data.error || 'Google authentication failed.');
+      const data = await safeParseResponse(res);
+      if (data.sessionToken) {
+        localStorage.setItem(SESSION_STORAGE_KEY, data.sessionToken);
       }
-
       setUser(data.user);
       return data.user;
     } catch (err: any) {
@@ -94,17 +137,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }): Promise<User> => {
     setAuthError(null);
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || data.error || 'Registration failed.');
+      const data = await safeParseResponse(res);
+      if (data.sessionToken) {
+        localStorage.setItem(SESSION_STORAGE_KEY, data.sessionToken);
       }
-
       setUser(data.user);
       return data.user;
     } catch (err: any) {
@@ -116,17 +158,37 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loginWithPassword = async (email: string, password: string): Promise<User> => {
     setAuthError(null);
     try {
-      const res = await fetch('/api/auth/login-password', {
+      const res = await apiFetch('/api/auth/login-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || data.error || 'Login failed.');
+      const data = await safeParseResponse(res);
+      if (data.sessionToken) {
+        localStorage.setItem(SESSION_STORAGE_KEY, data.sessionToken);
       }
+      setUser(data.user);
+      return data.user;
+    } catch (err: any) {
+      setAuthError(err.message);
+      throw err;
+    }
+  };
 
+  const resetPassword = async (email: string, newPassword: string): Promise<User> => {
+    setAuthError(null);
+    try {
+      const res = await apiFetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, newPassword }),
+      });
+
+      const data = await safeParseResponse(res);
+      if (data.sessionToken) {
+        localStorage.setItem(SESSION_STORAGE_KEY, data.sessionToken);
+      }
       setUser(data.user);
       return data.user;
     } catch (err: any) {
@@ -137,11 +199,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
       await signOutFromFirebase();
     } catch {
       // ignore
     } finally {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
       setUser(null);
       window.location.href = '/login';
     }
@@ -149,7 +212,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const refreshUser = async () => {
     try {
-      const res = await fetch('/api/auth/me');
+      const res = await apiFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
         setUser(data.user || null);
@@ -160,7 +223,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const saveCustomClientId = async (clientId: string) => {
-    const res = await fetch('/api/auth/save-client-id', {
+    const res = await apiFetch('/api/auth/save-client-id', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clientId }),
@@ -183,6 +246,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loginWithGoogle,
         registerWithPassword,
         loginWithPassword,
+        resetPassword,
         logout,
         refreshUser,
         saveCustomClientId,
