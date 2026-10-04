@@ -1,0 +1,7 @@
+{
+  "name": "QueueLess",
+  "description": "Smart Queue & Intelligent Waiting Management System — Your turn is reserved, your time is yours.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
