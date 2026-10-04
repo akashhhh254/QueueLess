@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { signInWithGoogle } from '../services/firebase';
-import { getErrorMessage, normalizeError } from '../utils/errorHelper';
+import { signInWithGoogle, mapFirebaseAuthError } from '../services/firebase';
+import { getErrorMessage, normalizeError, extractSafeAuthMessage } from '../utils/errorHelper';
 import { AlertCircle, UserPlus, Lock, Mail, User, Copy, ExternalLink, CheckCircle2 } from 'lucide-react';
 
 interface RegisterPageProps {
@@ -69,8 +69,13 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
         role,
       });
       onNavigate(redirectTo);
-    } catch (err: any) {
-      setLocalError(getErrorMessage(err, 'Unable to create account. Please check your details and try again.'));
+    } catch (error: any) {
+      console.error('Firebase authentication error:', error);
+      const message =
+        error?.code && error?.message
+          ? mapFirebaseAuthError(error)
+          : extractSafeAuthMessage(error, 'Unable to create account. Please check your details and try again.');
+      setLocalError(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -89,10 +94,11 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
       }
       await loginWithGoogle(googleResult.idToken, role);
       onNavigate(redirectTo);
-    } catch (err: any) {
-      const normalized = normalizeError(err, 'Google authentication could not be completed. Please try again.');
+    } catch (error: any) {
+      console.error('Firebase authentication error:', error);
+      const normalized = normalizeError(error, 'Google authentication could not be completed. Please try again.');
       const isDomainIssue =
-        err?.code === 'auth/unauthorized-domain' ||
+        error?.code === 'auth/unauthorized-domain' ||
         normalized.code === 'auth/unauthorized-domain' ||
         normalized.message.toLowerCase().includes('authorized domain') ||
         normalized.message.toLowerCase().includes('not authorized in firebase console') ||
@@ -101,7 +107,11 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
       if (isDomainIssue) {
         setIsDomainError(true);
       } else {
-        setLocalError(normalized.message);
+        const message =
+          error?.code && error?.message
+            ? mapFirebaseAuthError(error)
+            : extractSafeAuthMessage(error, 'Google authentication could not be completed. Please try again.');
+        setLocalError(message);
       }
     } finally {
       setIsSubmitting(false);

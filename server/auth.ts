@@ -53,30 +53,32 @@ export class AuthService {
       // Fall through to Firebase verification
     }
 
-    // 2. Try Google Firebase Identity Toolkit API
-    try {
-      const apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "AIzaSyAR-kukfNbGB2ZiB8mO5jExcnwFShrBm3U";
-      const fbResponse = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: cleanToken }),
-        signal: AbortSignal.timeout(2500),
-      });
+    // 2. Try Google Firebase Identity Toolkit API if API key is present
+    const apiKey = (process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || '').trim();
+    if (apiKey) {
+      try {
+        const fbResponse = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: cleanToken }),
+          signal: AbortSignal.timeout(2500),
+        });
 
-      if (fbResponse.ok) {
-        const data = (await fbResponse.json()) as any;
-        const fbUser = data.users?.[0];
-        if (fbUser && fbUser.email) {
-          return {
-            googleId: fbUser.localId || fbUser.rawId || `google_${Date.now()}`,
-            email: fbUser.email.toLowerCase().trim(),
-            name: fbUser.displayName || fbUser.email.split('@')[0],
-            picture: fbUser.photoUrl,
-          };
+        if (fbResponse.ok) {
+          const data = (await fbResponse.json()) as any;
+          const fbUser = data.users?.[0];
+          if (fbUser && fbUser.email) {
+            return {
+              googleId: fbUser.localId || fbUser.rawId || `google_${Date.now()}`,
+              email: fbUser.email.toLowerCase().trim(),
+              name: fbUser.displayName || fbUser.email.split('@')[0],
+              picture: fbUser.photoUrl,
+            };
+          }
         }
+      } catch {
+        // Fall through to fallback JWT decoding
       }
-    } catch {
-      // Fall through to fallback JWT decoding
     }
 
     // 3. Fallback: Parse JWT payload directly for authenticated Firebase/Google tokens

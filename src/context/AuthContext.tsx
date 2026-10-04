@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
-import { getErrorMessage } from '../utils/errorHelper';
+import { getErrorMessage, extractSafeAuthMessage } from '../utils/errorHelper';
 import {
   signUpWithFirebaseEmail,
   signInWithFirebaseEmail,
   sendFirebasePasswordReset,
   signOutFromFirebase,
+  mapFirebaseAuthError,
 } from '../services/firebase';
 
 const SESSION_STORAGE_KEY = 'queueless_session_token';
@@ -164,7 +165,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       return await performBackendGoogleAuth(credential, role);
     } catch (err: any) {
-      const msg = getErrorMessage(err, 'Google authentication failed. Please try again.');
+      console.error('Firebase authentication error:', err);
+      const msg = extractSafeAuthMessage(err, 'Google authentication failed. Please try again.');
       setAuthError(msg);
       throw new Error(msg);
     }
@@ -184,12 +186,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const fbResult = await signUpWithFirebaseEmail(params.name, params.email, params.password);
       firebaseIdToken = fbResult.idToken;
     } catch (fbErr: any) {
-      console.warn('[QueueLess Auth] Firebase signup note:', fbErr?.message || fbErr);
+      console.error('Firebase registration error:', fbErr);
       // If project has not toggled Email/Password in console, allow local creation
-      if (fbErr?.message?.includes('Firebase Email/Password provider is not enabled')) {
-        // Fall back to local creation
+      if (fbErr?.message?.includes('Email/Password provider is not enabled') || fbErr?.code === 'auth/operation-not-allowed') {
+        console.warn('[QueueLess Auth] Email/Password provider not enabled in Firebase Console, continuing with local registration.');
       } else {
-        const msg = getErrorMessage(fbErr, 'Registration failed in Firebase. Please try again.');
+        const msg =
+          fbErr?.code && fbErr?.message
+            ? mapFirebaseAuthError(fbErr)
+            : extractSafeAuthMessage(fbErr, 'Registration failed in Firebase. Please try again.');
         setAuthError(msg);
         throw new Error(msg);
       }
@@ -215,7 +220,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(data.user);
       return data.user;
     } catch (err: any) {
-      const msg = getErrorMessage(err, 'Registration failed. Please try again.');
+      console.error('Registration error:', err);
+      const msg = extractSafeAuthMessage(err, 'Registration failed. Please try again.');
       setAuthError(msg);
       throw new Error(msg);
     }
@@ -250,7 +256,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(data.user);
       return data.user;
     } catch (err: any) {
-      const msg = getErrorMessage(err, 'Login failed. Please check your credentials.');
+      console.error('Login error:', err);
+      const msg = extractSafeAuthMessage(err, 'Login failed. Please check your credentials.');
       setAuthError(msg);
       throw new Error(msg);
     }
@@ -262,8 +269,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // 1. Send Firebase password reset email
     try {
       await sendFirebasePasswordReset(email);
-    } catch (fbErr) {
-      console.warn('[QueueLess Auth] Firebase password reset note:', fbErr);
+    } catch (fbErr: any) {
+      console.warn('[QueueLess Auth] Firebase password reset note:', fbErr?.message || fbErr);
     }
 
     // 2. Update local database
@@ -281,7 +288,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(data.user);
       return data.user;
     } catch (err: any) {
-      const msg = getErrorMessage(err, 'Unable to reset password.');
+      console.error('Password reset error:', err);
+      const msg = extractSafeAuthMessage(err, 'Unable to reset password.');
       setAuthError(msg);
       throw new Error(msg);
     }

@@ -37,8 +37,14 @@ export function isObjectLikeString(val: unknown): boolean {
 export function mapAuthErrorCode(code: string): string | null {
   const normalized = code.toLowerCase().trim();
   switch (normalized) {
+    case 'auth/api-key-not-valid':
+    case 'auth/invalid-api-key':
+    case 'auth/api-key-not-valid.-please-pass-a-valid-api-key.':
+      return 'The Firebase API key is invalid or not configured. Please ensure VITE_FIREBASE_API_KEY is properly configured in your Vercel Project Settings > Environment Variables.';
+    case 'auth/app-not-authorized':
+      return 'This application is not authorized to use Firebase Authentication with the provided API key. Please check your Firebase project credentials.';
     case 'auth/unauthorized-domain':
-      return 'This domain is not authorized in Firebase Console for Google authentication. Please whitelist this domain in Firebase settings.';
+      return 'This domain is not authorized in Firebase Console for authentication. Please whitelist this domain in Firebase Console > Authentication > Settings > Authorized Domains.';
     case 'auth/popup-blocked':
       return 'Your browser blocked the sign-in popup window. Please allow popups for this site, or tap "Continue with Google" again to redirect.';
     case 'auth/popup-closed-by-user':
@@ -53,15 +59,23 @@ export function mapAuthErrorCode(code: string): string | null {
       return 'This user account has been disabled. Please contact system support.';
     case 'auth/invalid-credential':
     case 'auth/invalid-id-token':
-      return 'Your Google authentication credentials could not be verified. Please sign in again.';
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Invalid email or password. Please verify your credentials and try again.';
+    case 'auth/email-already-in-use':
+      return 'An account already exists with this email address. Please sign in or reset your password.';
+    case 'auth/invalid-email':
+      return 'The email address format is not valid. Please enter a valid email address.';
+    case 'auth/weak-password':
+      return 'Password is too weak. Please use at least 6 characters.';
     case 'auth/account-exists-with-different-credential':
       return 'An account already exists with this email address. Please sign in using your existing password or preferred method.';
     case 'auth/operation-not-allowed':
-      return 'Google Sign-In is not currently enabled for this project. Please enable Google provider in the Firebase Console.';
+      return 'Authentication provider is not enabled in Firebase Console. Please enable Email/Password or Google provider in Firebase Console > Authentication > Sign-in method.';
     case 'auth/too-many-requests':
       return 'Too many consecutive attempts. Please wait a moment and try again.';
     case 'auth/configuration-not-found':
-      return 'Google authentication configuration was not found. Please verify Firebase project settings.';
+      return 'Authentication configuration was not found. Please verify Firebase project settings.';
     case 'auth/internal-error':
       return 'An internal authentication error occurred. Please refresh the page and try again.';
     default:
@@ -194,3 +208,42 @@ export function getErrorMessage(
   const result = normalizeError(error, fallback).message;
   return isObjectLikeString(result) ? fallback : result;
 }
+
+export function extractSafeAuthMessage(
+  error: unknown,
+  fallback = 'Authentication could not be completed. Please try again.'
+): string {
+  console.error('Firebase authentication error:', error);
+
+  const errObj = typeof error === 'object' && error !== null ? (error as Record<string, any>) : null;
+  const code = typeof errObj?.code === 'string' ? errObj.code : '';
+  const rawMsg = typeof errObj?.message === 'string' ? errObj.message : '';
+
+  if (code) {
+    const mapped = mapAuthErrorCode(code);
+    if (mapped) return mapped;
+  }
+
+  if (rawMsg && !isObjectLikeString(rawMsg)) {
+    const match = rawMsg.match(/auth\/[a-z0-9-]+/i);
+    if (match) {
+      const mapped = mapAuthErrorCode(match[0]);
+      if (mapped) return mapped;
+    }
+    const cleaned = rawMsg.replace(/^Firebase:\s*Error\s*\((.*?)\)\.?/i, '$1').trim();
+    if (cleaned && !isObjectLikeString(cleaned)) {
+      return cleaned;
+    }
+  }
+
+  if (error instanceof Error && error.message && !isObjectLikeString(error.message)) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && !isObjectLikeString(error)) {
+    return error;
+  }
+
+  return fallback;
+}
+

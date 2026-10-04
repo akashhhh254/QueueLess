@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { signInWithGoogle } from '../services/firebase';
-import { getErrorMessage, normalizeError } from '../utils/errorHelper';
+import { signInWithGoogle, mapFirebaseAuthError } from '../services/firebase';
+import { getErrorMessage, normalizeError, extractSafeAuthMessage } from '../utils/errorHelper';
 import { AlertCircle, CheckCircle2, Lock, Mail, LogIn, KeyRound, ArrowLeft, Copy, ExternalLink } from 'lucide-react';
 
 interface LoginPageProps {
@@ -44,8 +44,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
     try {
       await loginWithPassword(email, password);
       onNavigate(redirectTo);
-    } catch (err: any) {
-      setLocalError(getErrorMessage(err, 'Login failed. Please check your credentials.'));
+    } catch (error: any) {
+      console.error('Firebase authentication error:', error);
+      const message =
+        error?.code && error?.message
+          ? mapFirebaseAuthError(error)
+          : extractSafeAuthMessage(error, 'Login failed. Please check your credentials.');
+      setLocalError(message);
     } finally {
       setIsAuthenticating(false);
     }
@@ -65,10 +70,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
       }
       await loginWithGoogle(googleResult.idToken);
       onNavigate(redirectTo);
-    } catch (err: any) {
-      const normalized = normalizeError(err, 'Google authentication could not be completed. Please try again.');
+    } catch (error: any) {
+      console.error('Firebase authentication error:', error);
+      const normalized = normalizeError(error, 'Google authentication could not be completed. Please try again.');
       const isDomainIssue =
-        err?.code === 'auth/unauthorized-domain' ||
+        error?.code === 'auth/unauthorized-domain' ||
         normalized.code === 'auth/unauthorized-domain' ||
         normalized.message.toLowerCase().includes('authorized domain') ||
         normalized.message.toLowerCase().includes('not authorized in firebase console') ||
@@ -77,7 +83,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
       if (isDomainIssue) {
         setIsDomainError(true);
       } else {
-        setLocalError(normalized.message);
+        const message =
+          error?.code && error?.message
+            ? mapFirebaseAuthError(error)
+            : extractSafeAuthMessage(error, 'Google authentication could not be completed. Please try again.');
+        setLocalError(message);
       }
     } finally {
       setIsAuthenticating(false);
@@ -107,8 +117,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
       setTimeout(() => {
         onNavigate(redirectTo);
       }, 500);
-    } catch (err: any) {
-      setLocalError(getErrorMessage(err, 'Unable to reset password.'));
+    } catch (error: any) {
+      console.error('Firebase authentication error:', error);
+      const message =
+        error?.code && error?.message
+          ? mapFirebaseAuthError(error)
+          : extractSafeAuthMessage(error, 'Unable to reset password.');
+      setLocalError(message);
     } finally {
       setIsAuthenticating(false);
     }
