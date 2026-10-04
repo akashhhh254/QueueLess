@@ -121,6 +121,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
     setTimeout(() => setCopiedDomain(false), 3000);
   };
 
+  // Detect whether the current error is a Firebase unauthorized domain issue
+  const activeRawError = authError || localError;
+  const isUnauthorizedDomain =
+    isDomainError ||
+    (typeof activeRawError === 'string' && (
+      activeRawError.toLowerCase().includes('authorized domain') ||
+      activeRawError.toLowerCase().includes('not authorized in firebase console') ||
+      activeRawError.toLowerCase().includes('unauthorized-domain')
+    ));
+
+  const safeErrorMessage = activeRawError
+    ? getErrorMessage(activeRawError, 'Sign-in could not be completed. Please try again or use email/password.')
+    : null;
+
   return (
     <div className="min-h-[85vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-slate-50">
       <div className="max-w-md w-full space-y-6 bg-white p-8 rounded-2xl shadow-xl border border-slate-200">
@@ -159,14 +173,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
         )}
 
         {/* Domain Authorization Notice Banner */}
-        {isDomainError && (
+        {isUnauthorizedDomain && (
           <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2.5">
             <div className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
               <div className="flex-1">
                 <strong className="block font-semibold">Firebase Domain Authorization Required</strong>
                 <p className="mt-0.5 text-[11px] text-amber-800">
-                  Firebase requires you to whitelist this preview domain before Google Sign-In is allowed.
+                  Firebase requires you to whitelist this web app domain before Google Sign-In is allowed.
                 </p>
               </div>
             </div>
@@ -204,13 +218,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
         )}
 
         {/* Error Banners */}
-        {(authError || localError) && !isDomainError && (
+        {safeErrorMessage && !isUnauthorizedDomain && (
           <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
             <div className="flex-1 whitespace-pre-line space-y-1">
               <strong className="block font-semibold">Sign-In Notice</strong>
-              <span>{getErrorMessage(authError || localError, 'Sign-in failed. Please check your credentials.')}</span>
-              {getErrorMessage(authError || localError)?.toLowerCase().includes('invalid') && mode === 'LOGIN' && (
+              <span>{safeErrorMessage}</span>
+              {safeErrorMessage.toLowerCase().includes('invalid') && mode === 'LOGIN' && (
                 <div className="pt-1">
                   <button
                     type="button"

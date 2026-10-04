@@ -102,9 +102,19 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
     setTimeout(() => setCopiedDomain(false), 3000);
   };
 
+  // Detect whether the current error is a Firebase unauthorized domain issue
+  const activeRawError = authError || localError;
+  const isUnauthorizedDomain =
+    isDomainError ||
+    (typeof activeRawError === 'string' && (
+      activeRawError.toLowerCase().includes('authorized domain') ||
+      activeRawError.toLowerCase().includes('not authorized in firebase console') ||
+      activeRawError.toLowerCase().includes('unauthorized-domain')
+    ));
+
   // Safely extract the active error string to prevent any [object Object]
-  const displayedError = (authError || localError)
-    ? getErrorMessage(authError || localError, 'Unable to complete registration. Please try again.')
+  const safeErrorMessage = activeRawError
+    ? getErrorMessage(activeRawError, 'Unable to complete registration. Please try again.')
     : null;
 
   return (
@@ -133,7 +143,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
         )}
 
         {/* Domain Authorization Notice Banner */}
-        {isDomainError && (
+        {isUnauthorizedDomain && (
           <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2.5">
             <div className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
@@ -178,13 +188,13 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
         )}
 
         {/* Standard Error Banner */}
-        {displayedError && !isDomainError && (
+        {safeErrorMessage && !isUnauthorizedDomain && (
           <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
             <div className="flex-1 whitespace-pre-line space-y-1">
               <strong className="block font-semibold">Registration Notice</strong>
-              <span>{displayedError}</span>
-              {displayedError.toLowerCase().includes('already exists') && (
+              <span>{safeErrorMessage}</span>
+              {safeErrorMessage.toLowerCase().includes('already exists') && (
                 <div className="pt-1">
                   <button
                     type="button"

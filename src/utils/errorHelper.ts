@@ -7,7 +7,7 @@
  *   code?: string,
  *   status?: number
  * }
- * GUARANTEED to never produce "[object Object]".
+ * GUARANTEED to NEVER produce "[object Object]" or any variant under any circumstances.
  */
 
 export interface NormalizedAppError {
@@ -16,18 +16,39 @@ export interface NormalizedAppError {
   status?: number;
 }
 
+/**
+ * Robust detection of any string that looks like a coerced JavaScript object
+ * e.g. "[object Object]", "[object object]", "object object", "[object DOMException]", etc.
+ */
+export function isObjectLikeString(val: unknown): boolean {
+  if (typeof val !== 'string') return false;
+  const s = val.trim().toLowerCase();
+  return (
+    !s ||
+    s === '[object object]' ||
+    s === 'object object' ||
+    s.includes('[object') ||
+    s.includes('object]') ||
+    s.includes('object object') ||
+    /^\[object\s+.*\]$/i.test(val.trim())
+  );
+}
+
 export function mapAuthErrorCode(code: string): string | null {
   const normalized = code.toLowerCase().trim();
   switch (normalized) {
+    case 'auth/unauthorized-domain':
+      return 'This domain is not authorized in Firebase Console for Google authentication. Please whitelist this domain in Firebase settings.';
     case 'auth/popup-blocked':
       return 'Your browser blocked the sign-in popup window. Please allow popups for this site, or tap "Continue with Google" again to redirect.';
     case 'auth/popup-closed-by-user':
     case 'auth/cancelled-popup-request':
       return 'Google sign-in window was closed before completing. Please tap "Continue with Google" to try again.';
-    case 'auth/unauthorized-domain':
-      return 'This domain is not authorized in Firebase Console for Google authentication. Please whitelist this domain in Firebase settings.';
     case 'auth/network-request-failed':
       return 'A network error occurred while connecting to Google. Please check your internet connection and try again.';
+    case 'auth/operation-not-supported-in-this-environment':
+    case 'auth/web-storage-unsupported':
+      return 'Third-party cookies or web storage are restricted by your browser. Please enable cookies or sign in using email and password.';
     case 'auth/user-disabled':
       return 'This user account has been disabled. Please contact system support.';
     case 'auth/invalid-credential':
@@ -58,11 +79,11 @@ export function normalizeError(
 
   // 1. Primitive string error
   if (typeof error === 'string') {
-    const trimmed = error.trim();
-    if (!trimmed || trimmed === '[object Object]' || trimmed.toLowerCase() === 'object object') {
+    if (isObjectLikeString(error)) {
       return { message: fallback };
     }
 
+    const trimmed = error.trim();
     if (trimmed.includes('auth/')) {
       const match = trimmed.match(/auth\/[a-z0-9-]+/i);
       if (match) {
@@ -72,7 +93,7 @@ export function normalizeError(
     }
 
     const cleaned = trimmed.replace(/^Firebase:\s*Error\s*\((.*?)\)\.?/i, '$1').trim();
-    return { message: cleaned || fallback };
+    return { message: isObjectLikeString(cleaned) ? fallback : (cleaned || fallback) };
   }
 
   // 2. Error object or API envelope
@@ -81,7 +102,7 @@ export function normalizeError(
     let code: string | undefined = typeof errObj.code === 'string' ? errObj.code : undefined;
     let status: number | undefined = typeof errObj.status === 'number' ? errObj.status : undefined;
 
-    // Check code mapping
+    // Check Firebase / API error code first
     if (code) {
       const mapped = mapAuthErrorCode(code);
       if (mapped) {
@@ -94,7 +115,7 @@ export function normalizeError(
       const subError = errObj.error;
       const subCode = typeof subError.code === 'string' ? subError.code : code;
       const subMsg = typeof subError.message === 'string' ? subError.message.trim() : '';
-      if (subMsg && subMsg !== '[object Object]') {
+      if (subMsg && !isObjectLikeString(subMsg)) {
         return {
           message: subMsg,
           code: subCode,
@@ -106,7 +127,7 @@ export function normalizeError(
     // Check Axios/Fetch response wrappers (e.g. error.response.data)
     if (errObj.response?.data) {
       const normalizedSub = normalizeError(errObj.response.data, fallback);
-      if (normalizedSub.message !== fallback) {
+      if (normalizedSub.message !== fallback && !isObjectLikeString(normalizedSub.message)) {
         return {
           ...normalizedSub,
           status: status || (typeof errObj.response.status === 'number' ? errObj.response.status : undefined),
@@ -116,7 +137,7 @@ export function normalizeError(
 
     if (errObj.data) {
       const normalizedSub = normalizeError(errObj.data, fallback);
-      if (normalizedSub.message !== fallback) {
+      if (normalizedSub.message !== fallback && !isObjectLikeString(normalizedSub.message)) {
         return normalizedSub;
       }
     }
@@ -125,7 +146,7 @@ export function normalizeError(
     if (errObj.message) {
       if (typeof errObj.message === 'string') {
         const trimmed = errObj.message.trim();
-        if (trimmed && trimmed !== '[object Object]' && trimmed.toLowerCase() !== 'object object') {
+        if (trimmed && !isObjectLikeString(trimmed)) {
           if (trimmed.includes('auth/')) {
             const match = trimmed.match(/auth\/[a-z0-9-]+/i);
             if (match) {
@@ -134,25 +155,32 @@ export function normalizeError(
             }
           }
           const cleaned = trimmed.replace(/^Firebase:\s*Error\s*\((.*?)\)\.?/i, '$1').trim();
-          return { message: cleaned || fallback, code, status };
+          if (!isObjectLikeString(cleaned)) {
+            return { message: cleaned || fallback, code, status };
+          }
         }
       } else if (typeof errObj.message === 'object') {
         const normalizedSub = normalizeError(errObj.message, fallback);
-        if (normalizedSub.message !== fallback) return normalizedSub;
+        if (normalizedSub.message !== fallback && !isObjectLikeString(normalizedSub.message)) {
+          return normalizedSub;
+        }
       }
     }
 
     // Check err.error when it's a string
     if (typeof errObj.error === 'string') {
       const trimmed = errObj.error.trim();
-      if (trimmed && trimmed !== '[object Object]' && trimmed.toLowerCase() !== 'object object') {
+      if (trimmed && !isObjectLikeString(trimmed)) {
         return { message: trimmed, code, status };
       }
     }
 
     // Check err.statusText
     if (typeof errObj.statusText === 'string' && errObj.statusText.trim()) {
-      return { message: errObj.statusText.trim(), code, status };
+      const st = errObj.statusText.trim();
+      if (!isObjectLikeString(st)) {
+        return { message: st, code, status };
+      }
     }
   }
 
@@ -161,7 +189,8 @@ export function normalizeError(
 
 export function getErrorMessage(
   error: unknown,
-  fallback = 'Registration could not be completed. Please try again.'
+  fallback = 'Authentication could not be completed. Please try again.'
 ): string {
-  return normalizeError(error, fallback).message;
+  const result = normalizeError(error, fallback).message;
+  return isObjectLikeString(result) ? fallback : result;
 }

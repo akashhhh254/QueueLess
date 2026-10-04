@@ -83,6 +83,11 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult> {
     const result = await signInWithPopup(auth, provider);
     return await mapCredentialToResult(result);
   } catch (err: any) {
+    // If domain is not authorized in Firebase Console, redirect will also fail with unauthorized-domain
+    if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
+      throw err;
+    }
+
     const isBlocked =
       err?.code === 'auth/popup-blocked' ||
       err?.code === 'auth/operation-not-supported-in-this-environment' ||
@@ -90,11 +95,16 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult> {
       isMobileDevice();
 
     if (isBlocked && typeof window !== 'undefined') {
-      // Remember redirect intent so user can be automatically onboarded upon return
-      sessionStorage.setItem('queueless_google_redirect_in_progress', '1');
-      await signInWithRedirect(auth, provider);
-      // Return a pending promise while browser navigates
-      return new Promise(() => {});
+      try {
+        // Remember redirect intent so user can be automatically onboarded upon return
+        sessionStorage.setItem('queueless_google_redirect_in_progress', '1');
+        await signInWithRedirect(auth, provider);
+        // Return a pending promise while browser navigates
+        return new Promise(() => {});
+      } catch (redirectErr) {
+        sessionStorage.removeItem('queueless_google_redirect_in_progress');
+        throw redirectErr;
+      }
     }
 
     throw err;
