@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, apiFetch } from '../context/AuthContext';
 import { useWebSocket } from '../context/WebSocketContext';
 import { QueueEntry } from '../types';
 import { QRCodeModal } from '../components/QRCodeModal';
@@ -25,7 +25,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
 
   const fetchActiveEntry = useCallback(async () => {
     try {
-      const res = await fetch('/api/queues/active/me');
+      const res = await apiFetch('/api/queues/active/me');
       if (res.ok) {
         const data = await res.json();
         setActiveEntry(data.activeEntry || null);
@@ -61,7 +61,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
 
     setIsLeaving(true);
     try {
-      const res = await fetch(`/api/queues/${activeEntry.queue_id}/leave`, {
+      const res = await apiFetch(`/api/queues/${activeEntry.queue_id}/leave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entryId: activeEntry.id }),
@@ -85,7 +85,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
     const newAwayState = !activeEntry.is_away;
 
     try {
-      const res = await fetch(`/api/queues/entries/${activeEntry.id}/away`, {
+      const res = await apiFetch(`/api/queues/entries/${activeEntry.id}/away`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isAway: newAwayState }),
@@ -103,6 +103,45 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
     }
   };
 
+  // Helper for responsive dynamic metric value formatting that prevents overflow
+  const renderDynamicMetricValue = (
+    value: string | number | undefined | null,
+    colorScheme: 'teal-glow' | 'slate-dark' | 'teal-solid'
+  ) => {
+    const text = value !== undefined && value !== null && value !== '' ? String(value).trim() : '—';
+    const len = text.length;
+
+    // Responsive typography scale based on content length
+    let fontClasses = 'text-3xl sm:text-4xl lg:text-5xl font-extrabold font-mono tracking-tight';
+    if (len > 15) {
+      fontClasses = 'text-xs sm:text-sm lg:text-base font-bold font-sans leading-tight';
+    } else if (len > 10) {
+      fontClasses = 'text-sm sm:text-base lg:text-lg font-bold font-sans leading-snug';
+    } else if (len > 6) {
+      fontClasses = 'text-lg sm:text-xl lg:text-2xl font-bold font-sans leading-snug';
+    } else if (len > 4) {
+      fontClasses = 'text-2xl sm:text-3xl lg:text-4xl font-extrabold font-mono tracking-tight';
+    }
+
+    const colorClass =
+      colorScheme === 'teal-glow'
+        ? 'text-teal-400'
+        : colorScheme === 'teal-solid'
+        ? 'text-teal-700'
+        : 'text-slate-900';
+
+    return (
+      <div className="w-full min-w-0 flex-1 flex items-center justify-center py-2 px-1 my-auto overflow-hidden">
+        <span
+          className={`${fontClasses} ${colorClass} max-w-full break-words hyphens-auto text-center block select-all`}
+          title={text}
+        >
+          {text}
+        </span>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-16 text-center space-y-3">
@@ -113,14 +152,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 w-full min-w-0 overflow-x-hidden">
       {/* Welcome Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 min-w-0">
+        <div className="min-w-0">
           <span className="text-xs font-semibold text-teal-700 tracking-wide uppercase">
             Customer Dashboard
           </span>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight truncate">
             Welcome, {user?.name || 'Customer'}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -128,7 +167,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => fetchActiveEntry()}
             className="p-2 text-slate-500 hover:text-slate-900 bg-white border border-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-sm"
@@ -156,12 +195,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
 
       {/* Main Active Token Card or Empty State */}
       {activeEntry ? (
-        <div className="space-y-6">
+        <div className="space-y-6 min-w-0">
           {/* Urgent Status Banner if CALLED or SERVING */}
           {(activeEntry.status === 'CALLED' || activeEntry.status === 'SERVING') && (
             <div className="p-4 rounded-2xl bg-teal-600 text-white shadow-lg space-y-2 animate-bounce-short">
               <div className="flex items-center gap-2 font-bold text-sm">
-                <Volume2 className="w-5 h-5 animate-pulse" />
+                <Volume2 className="w-5 h-5 animate-pulse shrink-0" />
                 <span>IT'S YOUR TURN — PLEASE PROCEED TO COUNTER!</span>
               </div>
               <p className="text-xs text-teal-50 leading-relaxed">
@@ -175,7 +214,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
           {activeEntry.status === 'WAITING' && (activeEntry.peopleAhead || 0) <= 2 && (activeEntry.peopleAhead || 0) > 0 && (
             <div className="p-4 rounded-2xl bg-amber-500 text-white shadow-md space-y-1">
               <div className="flex items-center gap-2 font-bold text-sm">
-                <Bell className="w-4 h-4 animate-ping" />
+                <Bell className="w-4 h-4 animate-ping shrink-0" />
                 <span>YOUR TURN IS APPROACHING!</span>
               </div>
               <p className="text-xs text-amber-50">
@@ -185,26 +224,26 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
           )}
 
           {/* Primary Hero Token Display */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden min-w-0">
             {/* Header info */}
-            <div className="px-6 py-4 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-              <div>
+            <div className="p-4 sm:px-6 sm:py-4 bg-slate-50/80 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
+              <div className="min-w-0">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                   Active Service Station
                 </span>
-                <h3 className="text-base font-bold text-slate-900 leading-tight">
+                <h3 className="text-base font-bold text-slate-900 leading-tight truncate">
                   {activeEntry.service_name || activeEntry.queue_name}
                 </h3>
-                <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                  <MapPin className="w-3 h-3 text-slate-400" />
-                  <span>{activeEntry.location_name}</span>
+                <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5 truncate">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">{activeEntry.location_name}</span>
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto flex-wrap">
                 <button
                   onClick={() => setShowQRModal(true)}
-                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 flex items-center gap-1 shadow-sm"
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 flex items-center gap-1 shadow-sm shrink-0"
                   title="Show QR Code"
                 >
                   <QrCode className="w-3.5 h-3.5 text-slate-600" />
@@ -212,7 +251,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
                 </button>
 
                 <span
-                  className={`px-3 py-1 rounded-full text-xs font-mono font-semibold ${
+                  className={`px-3 py-1 rounded-full text-xs font-mono font-semibold shrink-0 ${
                     activeEntry.status === 'CALLED' || activeEntry.status === 'SERVING'
                       ? 'bg-teal-100 text-teal-800 animate-pulse'
                       : activeEntry.queue_status === 'DELAYED'
@@ -227,68 +266,63 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
               </div>
             </div>
 
-            {/* Huge Metrics Grid */}
-            <div className="p-6 sm:p-8">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-                {/* Your Token */}
-                <div className="p-4 rounded-xl bg-slate-900 text-white space-y-1 shadow-sm">
-                  <span className="text-[11px] font-medium text-slate-400 block tracking-wider">
+            {/* Responsive Metrics Grid: 1 col on mobile, 2 cols on tablet, 4 cols on desktop */}
+            <div className="p-4 sm:p-6 lg:p-8 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 text-center min-w-0 w-full">
+                {/* 1. Your Token */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 text-white flex flex-col justify-between items-center text-center min-w-0 w-full min-h-[140px] sm:min-h-[155px] shadow-sm">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block shrink-0">
                     YOUR TOKEN
                   </span>
-                  <span className="text-4xl sm:text-5xl font-extrabold font-mono tracking-tight text-teal-400 tabular-nums">
-                    {activeEntry.token_number}
-                  </span>
-                  <span className="text-[10px] text-slate-400 block">
+                  {renderDynamicMetricValue(activeEntry.token_number, 'teal-glow')}
+                  <span className="text-[11px] text-slate-400 block shrink-0 truncate max-w-full">
                     Seq #{activeEntry.raw_sequence}
                   </span>
                 </div>
 
-                {/* Now Serving */}
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                  <span className="text-[11px] font-medium text-slate-500 block tracking-wider">
+                {/* 2. Now Serving - Fully contained & dynamically scaled */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between items-center text-center min-w-0 w-full min-h-[140px] sm:min-h-[155px]">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block shrink-0">
                     NOW SERVING
                   </span>
-                  <span className="text-4xl sm:text-5xl font-extrabold font-mono text-slate-900 tracking-tight tabular-nums">
-                    {activeEntry.nowServingToken || '—'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 block">
+                  {renderDynamicMetricValue(activeEntry.nowServingToken, 'slate-dark')}
+                  <span className="text-[11px] text-slate-500 block shrink-0 truncate max-w-full">
                     {activeEntry.counter_name || 'Active Station'}
                   </span>
                 </div>
 
-                {/* People Ahead */}
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                  <span className="text-[11px] font-medium text-slate-500 block tracking-wider">
+                {/* 3. People Ahead */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between items-center text-center min-w-0 w-full min-h-[140px] sm:min-h-[155px]">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block shrink-0">
                     PEOPLE AHEAD
                   </span>
-                  <span className="text-4xl sm:text-5xl font-extrabold font-mono text-slate-900 tracking-tight tabular-nums">
-                    {activeEntry.peopleAhead !== undefined ? activeEntry.peopleAhead : '0'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 block">
+                  {renderDynamicMetricValue(
+                    activeEntry.peopleAhead !== undefined ? activeEntry.peopleAhead : 0,
+                    'slate-dark'
+                  )}
+                  <span className="text-[11px] text-slate-500 block shrink-0 truncate max-w-full">
                     In Waiting Line
                   </span>
                 </div>
 
-                {/* Estimated Wait */}
-                <div className="p-4 rounded-xl bg-teal-50/50 border border-teal-200 space-y-1">
-                  <span className="text-[11px] font-medium text-teal-800 block tracking-wider">
+                {/* 4. Estimated Wait */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-teal-50/50 border border-teal-200 flex flex-col justify-between items-center text-center min-w-0 w-full min-h-[140px] sm:min-h-[155px]">
+                  <span className="text-[11px] font-bold text-teal-800 uppercase tracking-wider block shrink-0">
                     ESTIMATED WAIT
                   </span>
-                  <span className="text-4xl sm:text-5xl font-extrabold font-mono text-teal-700 tracking-tight tabular-nums">
-                    ~{activeEntry.estimated_wait}
-                  </span>
-                  <span className="text-[10px] text-teal-700 block font-semibold">
+                  {renderDynamicMetricValue(`~${activeEntry.estimated_wait}`, 'teal-solid')}
+                  <span className="text-[11px] text-teal-700 block shrink-0 font-semibold truncate max-w-full">
                     Minutes (Dynamic)
                   </span>
                 </div>
               </div>
 
-              {/* Progress Stepper: JOINED -> WAITING -> ALMOST YOUR TURN -> YOUR TURN -> COMPLETED */}
-              <div className="mt-8 pt-6 border-t border-slate-100">
+              {/* Progress Stepper: JOINED -> WAITING -> NEAR TURN -> YOUR TURN -> COMPLETED */}
+              <div className="mt-8 pt-6 border-t border-slate-100 min-w-0">
                 <span className="text-xs font-semibold text-slate-700 block mb-3">
                   Queue Journey Progress
                 </span>
-                <div className="grid grid-cols-5 gap-2 text-center text-xs font-medium">
+                <div className="grid grid-cols-5 gap-1.5 sm:gap-3 text-center text-xs font-medium min-w-0">
                   {[
                     { label: 'Joined', done: true },
                     { label: 'Waiting', done: true },
@@ -301,14 +335,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
                       done: activeEntry.status === 'CALLED' || activeEntry.status === 'SERVING',
                     },
                     { label: 'Completed', done: activeEntry.status === 'COMPLETED' },
-                  ].map((step, idx) => (
-                    <div key={step.label} className="space-y-1.5">
+                  ].map((step) => (
+                    <div key={step.label} className="space-y-1.5 min-w-0">
                       <div
-                        className={`h-2 rounded-full transition-all ${
+                        className={`h-1.5 sm:h-2 rounded-full transition-all ${
                           step.done ? 'bg-teal-600' : 'bg-slate-200'
                         }`}
                       />
-                      <span className={`text-[11px] block truncate ${step.done ? 'text-teal-900 font-semibold' : 'text-slate-400'}`}>
+                      <span className={`text-[10px] sm:text-xs block break-words leading-tight ${step.done ? 'text-teal-900 font-semibold' : 'text-slate-400'}`}>
                         {step.label}
                       </span>
                     </div>
@@ -317,7 +351,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ onNavigate
               </div>
 
               {/* Wait Elsewhere Feature Panel */}
-              <div className="mt-8 p-5 rounded-xl border border-teal-200 bg-teal-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="mt-8 p-4 sm:p-5 rounded-xl border border-teal-200 bg-teal-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-w-0">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-teal-600" />

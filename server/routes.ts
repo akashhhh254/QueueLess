@@ -54,12 +54,20 @@ apiRouter.get('/auth/me', (req: AuthenticatedRequest, res: Response) => {
 });
 
 apiRouter.post('/auth/register', async (req: AuthenticatedRequest, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
     const { name, email, password, role } = req.body || {};
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        error: 'Registration Failed',
+        message: 'Full name, email address, and password are required.',
+      });
+    }
+
     const { user, sessionToken } = await AuthService.registerWithPassword({
-      name: name || '',
-      email: email || '',
-      password: password || '',
+      name: name.trim(),
+      email: email.trim(),
+      password,
       role: role === 'PROVIDER' ? 'PROVIDER' : 'CUSTOMER',
     });
 
@@ -71,24 +79,33 @@ apiRouter.post('/auth/register', async (req: AuthenticatedRequest, res: Response
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
-    res.json({
+    return res.status(201).json({
       success: true,
       user,
       sessionToken,
       message: `Account created successfully! Welcome, ${user.name}.`,
     });
   } catch (err: any) {
-    res.status(400).json({
+    const status = err.message?.includes('already exists') ? 409 : 400;
+    return res.status(status).json({
       error: 'Registration Failed',
       message: err.message || 'Unable to complete registration.',
     });
   }
 });
 
-apiRouter.post('/auth/login-password', async (req: AuthenticatedRequest, res: Response) => {
+const handleLoginRequest = async (req: AuthenticatedRequest, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
     const { email, password } = req.body || {};
-    const { user, sessionToken } = await AuthService.loginWithPassword(email || '', password || '');
+    if (!email || !password) {
+      return res.status(400).json({
+        error: 'Login Failed',
+        message: 'Please enter both your email address and password.',
+      });
+    }
+
+    const { user, sessionToken } = await AuthService.loginWithPassword(email.trim(), password);
 
     const isSecure = req.secure || process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('queueless_session', sessionToken, {
@@ -98,24 +115,35 @@ apiRouter.post('/auth/login-password', async (req: AuthenticatedRequest, res: Re
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
-    res.json({
+    return res.status(200).json({
       success: true,
       user,
       sessionToken,
       message: `Welcome back, ${user.name}!`,
     });
   } catch (err: any) {
-    res.status(401).json({
+    return res.status(401).json({
       error: 'Login Failed',
       message: err.message || 'Invalid email or password.',
     });
   }
-});
+};
+
+apiRouter.post('/auth/login-password', handleLoginRequest);
+apiRouter.post('/auth/login', handleLoginRequest);
 
 apiRouter.post('/auth/reset-password', async (req: AuthenticatedRequest, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
     const { email, newPassword } = req.body || {};
-    const { user, sessionToken } = await AuthService.resetPassword(email || '', newPassword || '');
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        error: 'Password Reset Failed',
+        message: 'Please enter both email and your new password.',
+      });
+    }
+
+    const { user, sessionToken } = await AuthService.resetPassword(email.trim(), newPassword);
 
     const isSecure = req.secure || process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('queueless_session', sessionToken, {
@@ -125,14 +153,14 @@ apiRouter.post('/auth/reset-password', async (req: AuthenticatedRequest, res: Re
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
-    res.json({
+    return res.status(200).json({
       success: true,
       user,
       sessionToken,
       message: `Password updated successfully! Welcome, ${user.name}.`,
     });
   } catch (err: any) {
-    res.status(400).json({
+    return res.status(400).json({
       error: 'Password Reset Failed',
       message: err.message || 'Unable to reset password.',
     });

@@ -1,18 +1,39 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
-import { signOutFromFirebase } from '../services/firebase';
+import { auth, signOutFromFirebase } from '../services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 const SESSION_STORAGE_KEY = 'queueless_session_token';
 
 /**
  * Safe fetch wrapper that automatically attaches the Bearer token for /api requests.
+ * Uses the fresh Firebase Auth ID token if available, or the cached session token.
  * Does NOT mutate the read-only window.fetch getter, ensuring full compatibility across all browsers & iframes.
  */
 export const apiFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const token = typeof window !== 'undefined' ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
+  let token = typeof window !== 'undefined' ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
+
+  // If Firebase has an authenticated user, retrieve fresh ID token
+  if (auth?.currentUser) {
+    try {
+      const fbToken = await auth.currentUser.getIdToken();
+      if (fbToken) {
+        token = fbToken;
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(SESSION_STORAGE_KEY, fbToken);
+        }
+      }
+    } catch {
+      // Fall back to cached token
+    }
+  }
+
   const requestInit = { ...(init || {}) };
   const headers = new Headers(requestInit.headers || {});
 
+  if (!headers.has('Accept')) {
+    headers.set('Accept', 'application/json');
+  }
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -28,9 +49,9 @@ async function safeParseResponse(res: Response): Promise<any> {
     data = JSON.parse(text);
   } catch {
     if (!res.ok) {
-      throw new Error(`Server temporarily unavailable (${res.status}). Please try again in a few moments.`);
+      throw new Error(`Authentication server error (${res.status}). Please try again.`);
     }
-    throw new Error('Unexpected response received from server.');
+    throw new Error('Received unexpected response format from server.');
   }
 
   if (!res.ok) {
@@ -105,7 +126,45 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   useEffect(() => {
-    fetchAuthStatus();
+    let isMounted = true;
+
+    // Listen to Firebase Auth state for seamless persistence
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (!isMounted) return;
+
+      if (fbUser) {
+        try {
+          const idToken = await fbUser.getIdToken();
+          localStorage.setItem(SESSION_STORAGE_KEY, idToken);
+
+          // Synchronize with backend SQLite user record
+          const syncRes = await apiFetch('/api/auth/google', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credential: idToken }),
+          });
+
+          if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            if (syncData.user && isMounted) {
+              setUser(syncData.user);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to sync Firebase auth state:', err);
+        } finally {
+          if (isMounted) setLoading(false);
+        }
+      } else {
+        // Fallback to SQLite cookie/token session check
+        fetchAuthStatus();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const loginWithGoogle = async (credential: string): Promise<User> => {

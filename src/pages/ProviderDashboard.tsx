@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, apiFetch } from '../context/AuthContext';
 import { useWebSocket } from '../context/WebSocketContext';
 import {
   Users, Clock, Play, SkipForward, RotateCcw, Pause,
@@ -20,7 +20,7 @@ export const ProviderDashboard: React.FC = () => {
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      const res = await fetch('/api/provider/dashboard');
+      const res = await apiFetch('/api/provider/dashboard');
       if (res.ok) {
         const data = await res.json();
         setQueues(data.queues || []);
@@ -70,7 +70,7 @@ export const ProviderDashboard: React.FC = () => {
 
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/queues/${currentQueue.id}/next`, {
+      const res = await apiFetch(`/api/queues/${currentQueue.id}/next`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ counterId: selectedCounterId }),
@@ -91,7 +91,7 @@ export const ProviderDashboard: React.FC = () => {
     if (!currentQueue) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/queues/${currentQueue.id}/complete`, {
+      const res = await apiFetch(`/api/queues/${currentQueue.id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entryId, counterId: selectedCounterId }),
@@ -112,7 +112,7 @@ export const ProviderDashboard: React.FC = () => {
     if (!currentQueue) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/queues/${currentQueue.id}/skip`, {
+      const res = await apiFetch(`/api/queues/${currentQueue.id}/skip`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entryId }),
@@ -133,7 +133,7 @@ export const ProviderDashboard: React.FC = () => {
     if (!currentQueue || !selectedCounterId) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/queues/${currentQueue.id}/recall`, {
+      const res = await apiFetch(`/api/queues/${currentQueue.id}/recall`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entryId, counterId: selectedCounterId }),
@@ -154,7 +154,7 @@ export const ProviderDashboard: React.FC = () => {
     if (!currentQueue) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/queues/${currentQueue.id}/status`, {
+      const res = await apiFetch(`/api/queues/${currentQueue.id}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),

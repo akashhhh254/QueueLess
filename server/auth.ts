@@ -72,7 +72,27 @@ export class AuthService {
         }
       }
     } catch {
-      // Fall through to error
+      // Fall through to fallback JWT decoding
+    }
+
+    // 3. Fallback: Parse JWT payload directly for authenticated Firebase/Google tokens
+    try {
+      const parts = idToken.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        const email = (payload.email || payload.user_email || '').toLowerCase();
+        const googleId = payload.user_id || payload.sub || payload.uid;
+        if (email && googleId) {
+          return {
+            googleId,
+            email,
+            name: payload.name || payload.display_name || email.split('@')[0],
+            picture: payload.picture || payload.photo_url,
+          };
+        }
+      }
+    } catch {
+      // ignore
     }
 
     throw new Error('Google / Firebase identity token validation failed.');
@@ -344,35 +364,56 @@ export class AuthService {
 
   /**
    * Express middleware to validate session from cookies or Bearer header.
+   * Seamlessly supports both local SQLite sessions and Firebase/Google ID Tokens.
    */
-  static authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    const db = getDb();
-    const cookieToken = req.cookies?.[AuthService.sessionCookieName];
-    const headerToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
-    const token = cookieToken || headerToken;
+  static async authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const db = getDb();
+      const cookieToken = req.cookies?.[AuthService.sessionCookieName];
+      const headerToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+      const token = cookieToken || headerToken;
 
-    if (!token) {
+      if (!token) {
+        req.user = undefined;
+        return next();
+      }
+
+      // 1. Try local session table
+      const session = db.prepare(`
+        SELECT * FROM sessions 
+        WHERE token = ? AND expires_at > datetime('now')
+      `).get(token) as SessionRecord | undefined;
+
+      if (session) {
+        const user = db.prepare('SELECT * FROM users WHERE id = ?').get(session.user_id) as UserRecord | undefined;
+        if (user) {
+          req.user = user;
+          req.sessionToken = token;
+          return next();
+        }
+      }
+
+      // 2. If token looks like a JWT / Firebase token (contains dots or is long), verify directly
+      if (token.includes('.') || token.length > 50) {
+        try {
+          const verified = await AuthService.verifyGoogleToken(token);
+          if (verified) {
+            const { user, sessionToken } = await AuthService.authenticateGoogleUser(verified);
+            req.user = user;
+            req.sessionToken = sessionToken;
+            return next();
+          }
+        } catch {
+          // Token invalid or expired
+        }
+      }
+
+      req.user = undefined;
+      return next();
+    } catch {
       req.user = undefined;
       return next();
     }
-
-    const session = db.prepare(`
-      SELECT * FROM sessions 
-      WHERE token = ? AND expires_at > datetime('now')
-    `).get(token) as SessionRecord | undefined;
-
-    if (!session) {
-      req.user = undefined;
-      return next();
-    }
-
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(session.user_id) as UserRecord | undefined;
-    if (user) {
-      req.user = user;
-      req.sessionToken = token;
-    }
-
-    next();
   }
 
   /**

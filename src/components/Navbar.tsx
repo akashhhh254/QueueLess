@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, apiFetch } from '../context/AuthContext';
 import { useWebSocket } from '../context/WebSocketContext';
 import { Bell, CheckCircle2, ChevronDown, LogOut, Shield, User, Radio, RefreshCw, X } from 'lucide-react';
 import { NotificationItem } from '../types';
@@ -21,7 +21,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
   const fetchNotifications = async () => {
     if (!user) return;
     try {
-      const res = await fetch('/api/notifications');
+      const res = await apiFetch('/api/notifications');
       if (res.ok) {
         const data = await res.json();
         setNotifications(data.notifications || []);
@@ -42,7 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
 
   const markAllAsRead = async () => {
     try {
-      await fetch('/api/notifications/read-all', { method: 'POST' });
+      await apiFetch('/api/notifications/read-all', { method: 'POST' });
       setUnreadCount(0);
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: 1 })));
     } catch {
@@ -52,7 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
 
   const markSingleAsRead = async (id: string) => {
     try {
-      await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
+      await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
       setUnreadCount((c) => Math.max(0, c - 1));
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: 1 } : n)));
     } catch {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, apiFetch } from '../context/AuthContext';
 import { ServiceLocation, ServiceItem, QueueItem } from '../types';
 import {
   Building2, Hospital, Landmark, FileText, Activity,
@@ -29,11 +29,18 @@ export const JoinQueuePage: React.FC<JoinQueuePageProps> = ({ onNavigate, presel
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<string>('ALL');
 
+  // Sync customerName if user profile arrives after initialization
+  useEffect(() => {
+    if (user?.name && !customerName) {
+      setCustomerName(user.name);
+    }
+  }, [user]);
+
   // Fetch locations
   useEffect(() => {
     const fetchLocations = async () => {
       try {
-        const res = await fetch('/api/locations');
+        const res = await apiFetch('/api/locations');
         if (res.ok) {
           const data = await res.json();
           setLocations(data);
@@ -56,7 +63,7 @@ export const JoinQueuePage: React.FC<JoinQueuePageProps> = ({ onNavigate, presel
 
     const fetchLocationDetails = async () => {
       try {
-        const res = await fetch(`/api/locations/${selectedLocationId}`);
+        const res = await apiFetch(`/api/locations/${selectedLocationId}`);
         if (res.ok) {
           const data = await res.json();
           setServices(data.services || []);
@@ -96,11 +103,11 @@ export const JoinQueuePage: React.FC<JoinQueuePageProps> = ({ onNavigate, presel
 
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/queues/${selectedQueue.id}/join`, {
+      const res = await apiFetch(`/api/queues/${selectedQueue.id}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: customerName,
+          name: customerName || user?.name || 'Customer',
           phone: customerPhone,
           priorityReason: priorityReason || null,
         }),

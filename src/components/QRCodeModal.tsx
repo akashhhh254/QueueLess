@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../context/AuthContext';
 import { X, QrCode, Download, ExternalLink, Copy, Check } from 'lucide-react';
 
 interface QRCodeModalProps {
@@ -16,7 +17,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({ queueId, queueName, on
   useEffect(() => {
     const fetchQR = async () => {
       try {
-        const res = await fetch(`/api/queues/${queueId}/qr`);
+        const res = await apiFetch(`/api/queues/${queueId}/qr`);
         if (res.ok) {
           const data = await res.json();
           setQrDataUrl(data.qrDataUrl);

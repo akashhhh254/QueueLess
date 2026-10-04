@@ -33,9 +33,11 @@ async function startServer() {
 
   // Mount API endpoints
   app.use('/api', apiRouter);
+  // Alias in case client requests /auth directly
+  app.use('/auth', apiRouter);
 
   // Catch-all 404 for API routes so they NEVER fall through to HTML/Vite middlewares
-  app.use('/api', (req, res) => {
+  app.use(['/api', '/api/*'], (req, res) => {
     res.status(404).json({ error: 'Endpoint not found', path: req.originalUrl });
   });
 
@@ -46,6 +48,18 @@ async function startServer() {
       database: 'connected',
       server: 'QueueLess Core',
       timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Global Express error handler ensuring all errors are JSON, never HTML
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+    const statusCode = typeof err.status === 'number' ? err.status : 500;
+    res.status(statusCode).json({
+      error: err.name || 'Server Error',
+      message: err.message || 'An unexpected server error occurred.',
     });
   });
 

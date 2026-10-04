@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, apiFetch } from '../context/AuthContext';
 import { NotificationItem } from '../types';
 import { Bell, Check, Trash2, CheckCircle2 } from 'lucide-react';
 
@@ -10,7 +10,7 @@ export const NotificationsPage: React.FC = () => {
 
   const fetchNotifs = async () => {
     try {
-      const res = await fetch('/api/notifications');
+      const res = await apiFetch('/api/notifications');
       if (res.ok) {
         const data = await res.json();
         setNotifications(data.notifications || []);
@@ -27,12 +27,12 @@ export const NotificationsPage: React.FC = () => {
   }, []);
 
   const markAllRead = async () => {
-    await fetch('/api/notifications/read-all', { method: 'POST' });
+    await apiFetch('/api/notifications/read-all', { method: 'POST' });
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: 1 })));
   };
 
   const markOne = async (id: string) => {
-    await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
+    await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: 1 } : n)));
   };
 

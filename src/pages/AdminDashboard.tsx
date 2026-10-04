@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, apiFetch } from '../context/AuthContext';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, AreaChart, Area
@@ -24,9 +24,9 @@ export const AdminDashboard: React.FC = () => {
   const fetchAdminData = async () => {
     try {
       const [analyticsRes, usersRes, auditRes] = await Promise.all([
-        fetch('/api/admin/analytics'),
-        fetch('/api/admin/users'),
-        fetch('/api/admin/audit-logs'),
+        apiFetch('/api/admin/analytics'),
+        apiFetch('/api/admin/users'),
+        apiFetch('/api/admin/audit-logs'),
       ]);
 
       if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
@@ -46,7 +46,7 @@ export const AdminDashboard: React.FC = () => {
   const handleRoleChange = async (targetUserId: string, newRole: string) => {
     setRoleUpdating(targetUserId);
     try {
-      const res = await fetch(`/api/admin/users/${targetUserId}/role`, {
+      const res = await apiFetch(`/api/admin/users/${targetUserId}/role`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: newRole }),
