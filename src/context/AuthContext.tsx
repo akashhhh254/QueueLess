@@ -1,20 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
-import { auth, signOutFromFirebase } from '../services/firebase';
+import { auth, signOutFromFirebase, checkRedirectAuthResult } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { getErrorMessage } from '../utils/errorHelper';
 
 const SESSION_STORAGE_KEY = 'queueless_session_token';
 
 /**
  * Safe fetch wrapper that automatically attaches the Bearer token for /api requests.
- * Uses the fresh Firebase Auth ID token if available, or the cached session token.
+ * Uses the fresh session token or Firebase Auth ID token.
  * Does NOT mutate the read-only window.fetch getter, ensuring full compatibility across all browsers & iframes.
  */
 export const apiFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   let token = typeof window !== 'undefined' ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
 
-  // If Firebase has an authenticated user, retrieve fresh ID token
-  if (auth?.currentUser) {
+  // If Firebase has an active user and no local token is present, get an ID token
+  if (!token && auth?.currentUser) {
     try {
       const fbToken = await auth.currentUser.getIdToken();
       if (fbToken) {
@@ -24,7 +25,7 @@ export const apiFetch = async (input: RequestInfo | URL, init?: RequestInit): Pr
         }
       }
     } catch {
-      // Fall back to cached token
+      // Fall back
     }
   }
 
@@ -55,7 +56,8 @@ async function safeParseResponse(res: Response): Promise<any> {
   }
 
   if (!res.ok) {
-    throw new Error(data?.message || data?.error || `Request failed (${res.status})`);
+    const errorMsg = getErrorMessage(data, `Request failed (${res.status})`);
+    throw new Error(errorMsg);
   }
   return data;
 }
@@ -68,7 +70,7 @@ interface AuthContextType {
     clientId: string;
     appUrl: string;
   };
-  loginWithGoogle: (credential: string) => Promise<User>;
+  loginWithGoogle: (credential: string, role?: 'CUSTOMER' | 'PROVIDER') => Promise<User>;
   registerWithPassword: (params: { name: string; email: string; password: string; role?: 'CUSTOMER' | 'PROVIDER' }) => Promise<User>;
   loginWithPassword: (email: string, password: string) => Promise<User>;
   resetPassword: (email: string, newPassword: string) => Promise<User>;
@@ -80,6 +82,9 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// Module-level in-flight promise tracker to deduplicate concurrent Google auth requests
+let inFlightGoogleAuth: Promise<User> | null = null;
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -128,6 +133,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     let isMounted = true;
 
+    // Check for mobile Google redirect login result on mount
+    const checkRedirect = async () => {
+      try {
+        const redirectUser = await checkRedirectAuthResult();
+        if (redirectUser?.idToken && isMounted) {
+          await loginWithGoogle(redirectUser.idToken);
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setAuthError(getErrorMessage(err, 'Google authentication redirect failed. Please try again.'));
+        }
+      }
+    };
+    checkRedirect();
+
     // Listen to Firebase Auth state for seamless persistence
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (!isMounted) return;
@@ -135,20 +155,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (fbUser) {
         try {
           const idToken = await fbUser.getIdToken();
-          localStorage.setItem(SESSION_STORAGE_KEY, idToken);
-
-          // Synchronize with backend SQLite user record
-          const syncRes = await apiFetch('/api/auth/google', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ credential: idToken }),
-          });
-
-          if (syncRes.ok) {
-            const syncData = await syncRes.json();
-            if (syncData.user && isMounted) {
-              setUser(syncData.user);
-            }
+          // Synchronize with backend SQLite user record via deduplicated helper
+          const syncedUser = await performBackendGoogleAuth(idToken);
+          if (syncedUser && isMounted) {
+            setUser(syncedUser);
           }
         } catch (err) {
           console.error('Failed to sync Firebase auth state:', err);
@@ -167,24 +177,44 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
-  const loginWithGoogle = async (credential: string): Promise<User> => {
+  const performBackendGoogleAuth = async (credential: string, role?: 'CUSTOMER' | 'PROVIDER'): Promise<User> => {
+    if (inFlightGoogleAuth) {
+      return inFlightGoogleAuth;
+    }
+
+    inFlightGoogleAuth = (async () => {
+      try {
+        const res = await fetch('/api/auth/google', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ credential, role }),
+        });
+
+        const data = await safeParseResponse(res);
+        if (data.sessionToken && typeof window !== 'undefined') {
+          localStorage.setItem(SESSION_STORAGE_KEY, data.sessionToken);
+        }
+        setUser(data.user);
+        return data.user;
+      } finally {
+        inFlightGoogleAuth = null;
+      }
+    })();
+
+    return inFlightGoogleAuth;
+  };
+
+  const loginWithGoogle = async (credential: string, role?: 'CUSTOMER' | 'PROVIDER'): Promise<User> => {
     setAuthError(null);
     try {
-      const res = await apiFetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential }),
-      });
-
-      const data = await safeParseResponse(res);
-      if (data.sessionToken) {
-        localStorage.setItem(SESSION_STORAGE_KEY, data.sessionToken);
-      }
-      setUser(data.user);
-      return data.user;
+      return await performBackendGoogleAuth(credential, role);
     } catch (err: any) {
-      setAuthError(err.message);
-      throw err;
+      const msg = getErrorMessage(err, 'Google authentication failed. Please try again.');
+      setAuthError(msg);
+      throw new Error(msg);
     }
   };
 
@@ -209,8 +239,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(data.user);
       return data.user;
     } catch (err: any) {
-      setAuthError(err.message);
-      throw err;
+      const msg = getErrorMessage(err, 'Registration failed. Please try again.');
+      setAuthError(msg);
+      throw new Error(msg);
     }
   };
 
@@ -230,8 +261,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(data.user);
       return data.user;
     } catch (err: any) {
-      setAuthError(err.message);
-      throw err;
+      const msg = getErrorMessage(err, 'Login failed. Please check your credentials.');
+      setAuthError(msg);
+      throw new Error(msg);
     }
   };
 
@@ -251,8 +283,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(data.user);
       return data.user;
     } catch (err: any) {
-      setAuthError(err.message);
-      throw err;
+      const msg = getErrorMessage(err, 'Unable to reset password.');
+      setAuthError(msg);
+      throw new Error(msg);
     }
   };
 
@@ -264,6 +297,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // ignore
     } finally {
       localStorage.removeItem(SESSION_STORAGE_KEY);
+      sessionStorage.removeItem('queueless_google_redirect_in_progress');
       setUser(null);
       window.location.href = '/login';
     }
@@ -289,7 +323,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
     if (!res.ok) {
       const data = await res.json();
-      throw new Error(data.error || 'Failed to save Google Client ID');
+      throw new Error(getErrorMessage(data, 'Failed to save Google Client ID'));
     }
     setGoogleConfig((prev) => ({ ...prev, configured: true, clientId }));
   };

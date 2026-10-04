@@ -169,16 +169,23 @@ apiRouter.post('/auth/reset-password', async (req: AuthenticatedRequest, res: Re
 
 apiRouter.post('/auth/google', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { credential } = req.body;
-    if (!credential) {
-      return res.status(400).json({ error: 'Google credential token is required.' });
+    const { credential, idToken, token, role } = req.body || {};
+    const rawToken = credential || idToken || token;
+    if (!rawToken || typeof rawToken !== 'string') {
+      return res.status(400).json({
+        error: 'Google Authentication Failed',
+        message: 'Google identity token is required.',
+      });
     }
 
     // Real Google Identity Verification
-    const verified = await AuthService.verifyGoogleToken(credential);
+    const verified = await AuthService.verifyGoogleToken(rawToken);
 
     // Save/Find user and create session
-    const { user, sessionToken } = await AuthService.authenticateGoogleUser(verified);
+    const { user, sessionToken } = await AuthService.authenticateGoogleUser(
+      verified,
+      role === 'PROVIDER' ? 'PROVIDER' : 'CUSTOMER'
+    );
 
     const isSecure = req.secure || process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('queueless_session', sessionToken, {

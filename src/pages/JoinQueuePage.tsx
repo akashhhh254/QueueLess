@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth, apiFetch } from '../context/AuthContext';
 import { ServiceLocation, ServiceItem, QueueItem } from '../types';
+import { getErrorMessage } from '../utils/errorHelper';
 import {
   Building2, Hospital, Landmark, FileText, Activity,
   GraduationCap, Clock, Users, ArrowRight, ShieldCheck,
@@ -113,15 +114,20 @@ export const JoinQueuePage: React.FC<JoinQueuePageProps> = ({ onNavigate, presel
         }),
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        // ignore
+      }
       if (!res.ok) {
-        throw new Error(data.message || data.error || 'Failed to join queue');
+        throw new Error(getErrorMessage(data, 'Failed to join queue. Please try again.'));
       }
 
       // Navigate to live customer dashboard to track
       onNavigate('/dashboard');
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(getErrorMessage(err, 'Failed to join queue.'));
     } finally {
       setSubmitting(false);
     }

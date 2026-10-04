@@ -28,19 +28,22 @@ export class AuthService {
     name: string;
     picture?: string;
   }> {
-    if (!idToken) {
+    if (!idToken || typeof idToken !== 'string') {
       throw new Error('Google identity token is required.');
     }
+    const cleanToken = idToken.trim();
 
     // 1. Try Google OAuth tokeninfo endpoint
     try {
-      const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+      const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(cleanToken)}`, {
+        signal: AbortSignal.timeout(2500),
+      });
       if (response.ok) {
         const payload = (await response.json()) as any;
         if (payload.sub && payload.email) {
           return {
             googleId: payload.sub,
-            email: payload.email.toLowerCase(),
+            email: payload.email.toLowerCase().trim(),
             name: payload.name || payload.email.split('@')[0],
             picture: payload.picture,
           };
@@ -52,11 +55,12 @@ export class AuthService {
 
     // 2. Try Google Firebase Identity Toolkit API
     try {
-      const apiKey = "AIzaSyBuj0JQ-EPz-05gbq6VEi9dZu5Pwiq5UZ0";
+      const apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "AIzaSyBuj0JQ-EPz-05gbq6VEi9dZu5Pwiq5UZ0";
       const fbResponse = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
+        body: JSON.stringify({ idToken: cleanToken }),
+        signal: AbortSignal.timeout(2500),
       });
 
       if (fbResponse.ok) {
@@ -65,7 +69,7 @@ export class AuthService {
         if (fbUser && fbUser.email) {
           return {
             googleId: fbUser.localId || fbUser.rawId || `google_${Date.now()}`,
-            email: fbUser.email.toLowerCase(),
+            email: fbUser.email.toLowerCase().trim(),
             name: fbUser.displayName || fbUser.email.split('@')[0],
             picture: fbUser.photoUrl,
           };
@@ -77,16 +81,16 @@ export class AuthService {
 
     // 3. Fallback: Parse JWT payload directly for authenticated Firebase/Google tokens
     try {
-      const parts = idToken.split('.');
+      const parts = cleanToken.split('.');
       if (parts.length === 3) {
         const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-        const email = (payload.email || payload.user_email || '').toLowerCase();
+        const email = (payload.email || payload.user_email || '').toLowerCase().trim();
         const googleId = payload.user_id || payload.sub || payload.uid;
         if (email && googleId) {
           return {
             googleId,
             email,
-            name: payload.name || payload.display_name || email.split('@')[0],
+            name: payload.name || payload.display_name || email.split('@')[0] || 'QueueLess User',
             picture: payload.picture || payload.photo_url,
           };
         }
@@ -95,60 +99,82 @@ export class AuthService {
       // ignore
     }
 
-    throw new Error('Google / Firebase identity token validation failed.');
+    throw new Error('Google identity token verification failed. Please try signing in again.');
   }
 
   /**
    * Finds existing user or creates a new user, and issues a 30-day session.
+   * Completely idempotent and resilient against concurrent registration requests.
    */
-  static async authenticateGoogleUser(googlePayload: {
-    googleId: string;
-    email: string;
-    name: string;
-    picture?: string;
-  }): Promise<{ user: UserRecord; sessionToken: string }> {
+  static async authenticateGoogleUser(
+    googlePayload: {
+      googleId: string;
+      email: string;
+      name: string;
+      picture?: string;
+    },
+    requestedRole?: 'CUSTOMER' | 'PROVIDER'
+  ): Promise<{ user: UserRecord; sessionToken: string }> {
     const db = getDb();
     const now = new Date().toISOString();
+    const cleanEmail = (googlePayload.email || '').toLowerCase().trim();
+    const safeName = googlePayload.name?.trim() || (cleanEmail ? cleanEmail.split('@')[0] : 'QueueLess User');
+    const safeGoogleId = googlePayload.googleId || `gid_${crypto.randomUUID().slice(0, 10)}`;
 
     let user = db.prepare('SELECT * FROM users WHERE google_id = ? OR email = ?').get(
-      googlePayload.googleId,
-      googlePayload.email
+      safeGoogleId,
+      cleanEmail
     ) as UserRecord | undefined;
 
     if (!user) {
-      // First registered user gets ADMIN role to bootstrap administrative management; subsequent users default to CUSTOMER
+      // First registered user gets ADMIN role; subsequent users get requested role or CUSTOMER
       const userCountRow = db.prepare('SELECT count(*) as count FROM users').get() as { count: number };
-      const role: 'CUSTOMER' | 'PROVIDER' | 'ADMIN' = userCountRow.count === 0 ? 'ADMIN' : 'CUSTOMER';
+      const role: 'CUSTOMER' | 'PROVIDER' | 'ADMIN' = userCountRow.count === 0 ? 'ADMIN' : (requestedRole || 'CUSTOMER');
 
       const userId = `usr_${crypto.randomUUID().slice(0, 8)}`;
-      db.prepare(`
-        INSERT INTO users (id, google_id, name, email, profile_image, role, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        userId,
-        googlePayload.googleId,
-        googlePayload.name,
-        googlePayload.email,
-        googlePayload.picture || null,
-        role,
-        now,
-        now
-      );
+      try {
+        db.prepare(`
+          INSERT INTO users (id, google_id, name, email, profile_image, role, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          userId,
+          safeGoogleId,
+          safeName,
+          cleanEmail,
+          googlePayload.picture || null,
+          role,
+          now,
+          now
+        );
 
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as unknown as UserRecord;
+        user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as unknown as UserRecord;
 
-      // Audit log user registration
-      db.prepare(`
-        INSERT INTO audit_logs (id, actor_user_id, action, entity_type, entity_id, metadata, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(`audit_${crypto.randomUUID().slice(0, 8)}`, user.id, 'USER_REGISTER', 'users', user.id, JSON.stringify({ email: user.email, role }), now);
+        // Audit log user registration
+        db.prepare(`
+          INSERT INTO audit_logs (id, actor_user_id, action, entity_type, entity_id, metadata, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(`audit_${crypto.randomUUID().slice(0, 8)}`, user.id, 'USER_REGISTER', 'users', user.id, JSON.stringify({ email: user.email, role }), now);
+      } catch (insertErr: any) {
+        // Handle concurrent insert gracefully by re-querying
+        user = db.prepare('SELECT * FROM users WHERE google_id = ? OR email = ?').get(
+          safeGoogleId,
+          cleanEmail
+        ) as UserRecord | undefined;
+        if (!user) {
+          throw insertErr;
+        }
+      }
     } else {
-      // Update profile picture and name if changed
+      // Update profile details if available
+      const updatedName = googlePayload.name?.trim() || user.name || safeName;
+      const updatedGoogleId = user.google_id || safeGoogleId;
+      const updatedImage = googlePayload.picture || user.profile_image || null;
+
       db.prepare(`
         UPDATE users 
         SET name = ?, profile_image = ?, google_id = ?, updated_at = ? 
         WHERE id = ?
-      `).run(googlePayload.name, googlePayload.picture || user.profile_image, googlePayload.googleId, now, user.id);
+      `).run(updatedName, updatedImage, updatedGoogleId, now, user.id);
 
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as unknown as UserRecord;
     }

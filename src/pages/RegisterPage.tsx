@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { signInWithGoogle } from '../services/firebase';
+import { getErrorMessage } from '../utils/errorHelper';
 import { Shield, AlertCircle, CheckCircle2, ArrowRight, UserPlus, Lock, Mail, User, Copy, ExternalLink } from 'lucide-react';
 
 interface RegisterPageProps {
@@ -56,7 +57,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
       });
       onNavigate(redirectTo);
     } catch (err: any) {
-      setLocalError(err.message || 'Registration failed. Please try again.');
+      setLocalError(getErrorMessage(err, 'Registration failed. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -70,22 +71,22 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
 
     try {
       const googleResult = await signInWithGoogle();
-      await loginWithGoogle(googleResult.idToken);
+      if (!googleResult?.idToken) {
+        // If redirect flow initiated, browser will navigate
+        return;
+      }
+      await loginWithGoogle(googleResult.idToken, role);
       onNavigate(redirectTo);
     } catch (err: any) {
-      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
-        // User closed the popup window voluntarily or clicked away - treat as a normal cancellation
-        setLocalError('Google sign-up window was closed. You can try again or use the form below to register instantly.');
-      } else if (err?.code === 'auth/popup-blocked') {
-        setLocalError('Your browser blocked the popup window. Please enable popups or use the email/password form below.');
-      } else if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('auth/unauthorized-domain')) {
+      const friendlyMsg = getErrorMessage(err, 'Google authentication could not be completed. Please try again.');
+      if (
+        err?.code === 'auth/unauthorized-domain' ||
+        friendlyMsg.toLowerCase().includes('not authorized in firebase console') ||
+        friendlyMsg.toLowerCase().includes('auth/unauthorized-domain')
+      ) {
         setIsDomainError(true);
-      } else if (err?.code === 'auth/configuration-not-found') {
-        setLocalError(
-          'Firebase Authentication is not yet activated in your Firebase project. Please use the Email & Password registration form below.'
-        );
       } else {
-        setLocalError(err?.message || 'Google sign-up could not be completed. Please try the email/password form below.');
+        setLocalError(friendlyMsg);
       }
     } finally {
       setIsSubmitting(false);
@@ -97,6 +98,11 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
     setCopiedDomain(true);
     setTimeout(() => setCopiedDomain(false), 3000);
   };
+
+  // Safely extract the active error string to prevent any [object Object]
+  const displayedError = (authError || localError)
+    ? getErrorMessage(authError || localError, 'Unable to complete registration. Please try again.')
+    : null;
 
   return (
     <div className="min-h-[85vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-slate-50">
@@ -120,7 +126,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
               <div className="flex-1">
                 <strong className="block font-semibold">Firebase Domain Authorization Required</strong>
                 <p className="mt-0.5 text-[11px] text-amber-800">
-                  Firebase requires you to whitelist your web app domain before Google Popup sign-in is permitted.
+                  Firebase requires you to whitelist your web app domain before Google sign-in is permitted.
                 </p>
               </div>
             </div>
@@ -158,13 +164,13 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
         )}
 
         {/* Standard Error Banner */}
-        {(authError || localError) && !isDomainError && (
+        {displayedError && !isDomainError && (
           <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
             <div className="flex-1 whitespace-pre-line space-y-1">
               <strong className="block font-semibold">Registration Notice</strong>
-              <span>{authError || localError}</span>
-              {(authError || localError)?.toLowerCase().includes('already exists') && (
+              <span>{displayedError}</span>
+              {displayedError.toLowerCase().includes('already exists') && (
                 <div className="pt-1">
                   <button
                     type="button"
@@ -193,7 +199,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Dr. Rajesh Kumar or Priya Sharma"
+                placeholder="e.g. Dr. Rajesh Kumar or Priya Sharma"
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
               />
             </div>
@@ -210,7 +216,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
+                placeholder="name@organization.com"
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
               />
             </div>
@@ -218,7 +224,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Password (at least 6 characters)
+              Create Password
             </label>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -228,7 +234,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="•••••••• (min. 6 characters)"
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none font-mono"
               />
             </div>
@@ -316,7 +322,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
           type="button"
           onClick={handleGoogleSignUp}
           disabled={isSubmitting}
-          className="w-full py-2.5 px-4 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-800 font-semibold text-xs shadow-2xs transition-colors flex items-center justify-center gap-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-60"
+          className="w-full py-2.5 px-4 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-800 font-semibold text-xs shadow-2xs transition-colors flex items-center justify-center gap-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-60 cursor-pointer"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24">
             <path
@@ -336,7 +342,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
             />
           </svg>
-          <span>Sign up with Google</span>
+          <span>Continue with Google</span>
         </button>
 
         {/* Existing Account Link */}

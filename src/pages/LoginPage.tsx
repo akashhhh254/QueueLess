@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { signInWithGoogle } from '../services/firebase';
+import { getErrorMessage } from '../utils/errorHelper';
 import { Shield, AlertCircle, CheckCircle2, ArrowRight, Lock, Mail, LogIn, Copy, ExternalLink, KeyRound, ArrowLeft } from 'lucide-react';
 
 interface LoginPageProps {
@@ -44,7 +45,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
       await loginWithPassword(email, password);
       onNavigate(redirectTo);
     } catch (err: any) {
-      setLocalError(err.message || 'Login failed. Please check your credentials.');
+      setLocalError(getErrorMessage(err, 'Login failed. Please check your credentials.'));
     } finally {
       setIsAuthenticating(false);
     }
@@ -74,7 +75,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
         onNavigate(redirectTo);
       }, 500);
     } catch (err: any) {
-      setLocalError(err.message || 'Unable to reset password.');
+      setLocalError(getErrorMessage(err, 'Unable to reset password.'));
     } finally {
       setIsAuthenticating(false);
     }
@@ -90,21 +91,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
     try {
       // Trigger official Google Authentication via Firebase SDK
       const googleResult = await signInWithGoogle();
+      if (!googleResult?.idToken) {
+        return;
+      }
       await loginWithGoogle(googleResult.idToken);
       onNavigate(redirectTo);
     } catch (err: any) {
-      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
-        setLocalError('Google sign-in window was closed. You can click "Continue with Google" to try again, or sign in using your email and password below.');
-      } else if (err?.code === 'auth/popup-blocked') {
-        setLocalError('Your browser blocked the Google sign-in popup. Please allow popups for this site or use the email/password form below.');
-      } else if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('auth/unauthorized-domain')) {
+      const friendlyMsg = getErrorMessage(err, 'Google authentication could not be completed. Please try again or use email/password.');
+      if (
+        err?.code === 'auth/unauthorized-domain' ||
+        friendlyMsg.toLowerCase().includes('not authorized in firebase console') ||
+        friendlyMsg.toLowerCase().includes('auth/unauthorized-domain')
+      ) {
         setIsDomainError(true);
-      } else if (err?.code === 'auth/configuration-not-found') {
-        setLocalError(
-          'Firebase Authentication is not yet enabled in the Firebase Console. You can sign in using your email/password below or click "Register here" to create your account!'
-        );
       } else {
-        setLocalError(err?.message || 'Google authentication could not be completed. Please try again or use email/password.');
+        setLocalError(friendlyMsg);
       }
     } finally {
       setIsAuthenticating(false);
@@ -194,8 +195,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
             <div className="flex-1 whitespace-pre-line space-y-1">
               <strong className="block font-semibold">Sign-In Notice</strong>
-              <span>{authError || localError}</span>
-              {(authError || localError)?.toLowerCase().includes('invalid') && mode === 'LOGIN' && (
+              <span>{getErrorMessage(authError || localError, 'Sign-in failed. Please check your credentials.')}</span>
+              {getErrorMessage(authError || localError)?.toLowerCase().includes('invalid') && mode === 'LOGIN' && (
                 <div className="pt-1">
                   <button
                     type="button"
