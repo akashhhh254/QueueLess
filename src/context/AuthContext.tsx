@@ -141,9 +141,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           await loginWithGoogle(redirectUser.idToken);
         }
       } catch (err: any) {
-        if (isMounted) {
-          setAuthError(getErrorMessage(err, 'Google authentication redirect failed. Please try again.'));
-        }
+        // Cleanly log without polluting user error banner on initial mount
+        console.warn('[QueueLess] Redirect check on mount:', err);
       }
     };
     checkRedirect();

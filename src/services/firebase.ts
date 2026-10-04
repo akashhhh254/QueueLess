@@ -68,63 +68,53 @@ async function mapCredentialToResult(credential: UserCredential): Promise<Google
 }
 
 /**
- * Triggers Google Sign-In with full cross-platform mobile compatibility.
- * On mobile devices where popups are blocked or restricted, seamlessly falls back
- * to redirect-based authentication.
+ * Triggers Google Sign-In via popup for both mobile and desktop.
+ * signInWithPopup opens a native Google account overlay on mobile without
+ * page navigation or third-party cookie/storage-partitioning failure.
  */
 export async function signInWithGoogle(): Promise<GoogleAuthResult> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
 
-  // On touch / mobile devices, popups are frequently blocked or open off-screen.
-  // We attempt signInWithPopup first; if blocked or rejected by mobile policy,
-  // we initiate signInWithRedirect.
   try {
     const result = await signInWithPopup(auth, provider);
     return await mapCredentialToResult(result);
   } catch (err: any) {
-    // If domain is not authorized in Firebase Console, redirect will also fail with unauthorized-domain
-    if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
-      throw err;
+    // If popup was blocked by browser
+    if (err?.code === 'auth/popup-blocked') {
+      throw new Error('Sign-in popup was blocked by your browser. Please allow popups for this site or use email & password sign-in.');
     }
-
-    const isBlocked =
-      err?.code === 'auth/popup-blocked' ||
-      err?.code === 'auth/operation-not-supported-in-this-environment' ||
-      err?.message?.toLowerCase().includes('popup') ||
-      isMobileDevice();
-
-    if (isBlocked && typeof window !== 'undefined') {
-      try {
-        // Remember redirect intent so user can be automatically onboarded upon return
-        sessionStorage.setItem('queueless_google_redirect_in_progress', '1');
-        await signInWithRedirect(auth, provider);
-        // Return a pending promise while browser navigates
-        return new Promise(() => {});
-      } catch (redirectErr) {
-        sessionStorage.removeItem('queueless_google_redirect_in_progress');
-        throw redirectErr;
-      }
+    if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+      throw new Error('Google sign-in window was closed. Please tap "Continue with Google" to try again.');
     }
-
     throw err;
   }
 }
 
 /**
- * Checks if the user just returned from a Google OAuth redirect flow on mobile.
+ * Safely checks if the user returned from a redirect flow, without throwing on mount.
  */
 export async function checkRedirectAuthResult(): Promise<GoogleAuthResult | null> {
+  if (typeof window === 'undefined') return null;
+
+  // Only attempt getRedirectResult if an actual redirect was flagged in this browser session
+  const inProgress = sessionStorage.getItem('queueless_google_redirect_in_progress');
+  if (inProgress !== '1') {
+    return null;
+  }
+
   try {
-    const result = await getRedirectResult(auth);
     sessionStorage.removeItem('queueless_google_redirect_in_progress');
+    const result = await getRedirectResult(auth);
     if (!result || !result.user) {
       return null;
     }
     return await mapCredentialToResult(result);
   } catch (err) {
+    // Never allow redirect check errors to crash page mount or show raw errors
     sessionStorage.removeItem('queueless_google_redirect_in_progress');
-    throw err;
+    console.warn('[QueueLess Auth] Background redirect check warning:', err);
+    return null;
   }
 }
 

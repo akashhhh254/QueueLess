@@ -204,8 +204,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
           <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
             <div className="flex-1 whitespace-pre-line space-y-1">
-              <strong className="block font-semibold">Registration Notice</strong>
-              <span>{safeErrorMessage}</span>
+              <span className="font-medium text-red-800">{safeErrorMessage}</span>
               {safeErrorMessage.toLowerCase().includes('already exists') && (
                 <div className="pt-1">
                   <button
