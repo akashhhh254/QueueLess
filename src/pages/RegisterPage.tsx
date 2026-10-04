@@ -73,17 +73,19 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
       await loginWithGoogle(googleResult.idToken);
       onNavigate(redirectTo);
     } catch (err: any) {
-      console.error('[Google Sign-Up Error]:', err);
-      if (err.code === 'auth/unauthorized-domain' || err.message?.includes('auth/unauthorized-domain')) {
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        // User closed the popup window voluntarily or clicked away - treat as a normal cancellation
+        setLocalError('Google sign-up window was closed. You can try again or use the form below to register instantly.');
+      } else if (err?.code === 'auth/popup-blocked') {
+        setLocalError('Your browser blocked the popup window. Please enable popups or use the email/password form below.');
+      } else if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('auth/unauthorized-domain')) {
         setIsDomainError(true);
-      } else if (err.code === 'auth/popup-closed-by-user') {
-        setLocalError('Google sign-up was cancelled.');
-      } else if (err.code === 'auth/configuration-not-found') {
+      } else if (err?.code === 'auth/configuration-not-found') {
         setLocalError(
-          'Firebase Authentication is not yet activated. Please use the Email & Password registration form below.'
+          'Firebase Authentication is not yet activated in your Firebase project. Please use the Email & Password registration form below.'
         );
       } else {
-        setLocalError(err.message || 'Google sign-up failed.');
+        setLocalError(err?.message || 'Google sign-up could not be completed. Please try the email/password form below.');
       }
     } finally {
       setIsSubmitting(false);

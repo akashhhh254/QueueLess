@@ -55,17 +55,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
       await loginWithGoogle(googleResult.idToken);
       onNavigate(redirectTo);
     } catch (err: any) {
-      console.error('[Google Authentication Error]:', err);
-      if (err.code === 'auth/unauthorized-domain' || err.message?.includes('auth/unauthorized-domain')) {
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        // User closed the popup window voluntarily or clicked away - treat as a normal cancellation
+        setLocalError('Google sign-in window was closed. You can click "Continue with Google" to try again, or sign in using your email and password below.');
+      } else if (err?.code === 'auth/popup-blocked') {
+        setLocalError('Your browser blocked the Google sign-in popup. Please allow popups for this site or use the email/password form below.');
+      } else if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('auth/unauthorized-domain')) {
         setIsDomainError(true);
-      } else if (err.code === 'auth/popup-closed-by-user') {
-        setLocalError('Sign-in cancelled. Please click "Continue with Google" to complete authentication.');
-      } else if (err.code === 'auth/configuration-not-found') {
+      } else if (err?.code === 'auth/configuration-not-found') {
         setLocalError(
           'Firebase Authentication is not yet enabled in the Firebase Console. You can sign in using your email/password below or click "Register here" to create your account!'
         );
       } else {
-        setLocalError(err.message || 'Google authentication failed. Please try again.');
+        setLocalError(err?.message || 'Google authentication could not be completed. Please try again or use email/password.');
       }
     } finally {
       setIsAuthenticating(false);
