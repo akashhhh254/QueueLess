@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { signInWithGoogle } from '../services/firebase';
-import { getErrorMessage } from '../utils/errorHelper';
+import { getErrorMessage, normalizeError, isObjectLikeString } from '../utils/errorHelper';
 import { Shield, AlertCircle, CheckCircle2, ArrowRight, Lock, Mail, LogIn, Copy, ExternalLink, KeyRound, ArrowLeft } from 'lucide-react';
 
 interface LoginPageProps {
@@ -100,15 +100,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
       await loginWithGoogle(googleResult.idToken);
       onNavigate(redirectTo);
     } catch (err: any) {
-      const friendlyMsg = getErrorMessage(err, 'Google authentication could not be completed. Please try again or use email/password.');
-      if (
+      const normalized = normalizeError(err, 'Google authentication could not be completed. Please try again or use email/password.');
+      const isDomainIssue =
         err?.code === 'auth/unauthorized-domain' ||
-        friendlyMsg.toLowerCase().includes('not authorized in firebase console') ||
-        friendlyMsg.toLowerCase().includes('auth/unauthorized-domain')
-      ) {
+        normalized.code === 'auth/unauthorized-domain' ||
+        normalized.message.toLowerCase().includes('authorized domain') ||
+        normalized.message.toLowerCase().includes('not authorized in firebase console') ||
+        normalized.message.toLowerCase().includes('unauthorized-domain');
+
+      if (isDomainIssue) {
         setIsDomainError(true);
       } else {
-        setLocalError(friendlyMsg);
+        setLocalError(normalized.message);
       }
     } finally {
       setIsAuthenticating(false);
@@ -121,18 +124,27 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
     setTimeout(() => setCopiedDomain(false), 3000);
   };
 
-  // Detect whether the current error is a Firebase unauthorized domain issue
+  // Robust detection of current error and whether it is a Firebase unauthorized domain issue
   const activeRawError = authError || localError;
+  const normalizedError = activeRawError
+    ? normalizeError(activeRawError, 'Sign-in could not be completed. Please try again or use email/password.')
+    : null;
+
+  const rawCode = (activeRawError as any)?.code || normalizedError?.code || '';
+  const rawMessage = (activeRawError as any)?.message || normalizedError?.message || '';
+
   const isUnauthorizedDomain =
     isDomainError ||
-    (typeof activeRawError === 'string' && (
-      activeRawError.toLowerCase().includes('authorized domain') ||
-      activeRawError.toLowerCase().includes('not authorized in firebase console') ||
-      activeRawError.toLowerCase().includes('unauthorized-domain')
-    ));
+    rawCode === 'auth/unauthorized-domain' ||
+    String(rawCode).includes('unauthorized-domain') ||
+    String(rawMessage).toLowerCase().includes('unauthorized-domain') ||
+    String(rawMessage).toLowerCase().includes('authorized domain') ||
+    String(rawMessage).toLowerCase().includes('not authorized in firebase console');
 
-  const safeErrorMessage = activeRawError
-    ? getErrorMessage(activeRawError, 'Sign-in could not be completed. Please try again or use email/password.')
+  const safeErrorMessage = normalizedError
+    ? (isObjectLikeString(normalizedError.message)
+        ? 'Sign-in could not be completed. Please try again or use email/password.'
+        : normalizedError.message)
     : null;
 
   return (
