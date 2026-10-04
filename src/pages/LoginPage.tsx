@@ -19,6 +19,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
   const [mode, setMode] = useState<'LOGIN' | 'RESET_PASSWORD'>('LOGIN');
 
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isRedirecting] = useState(() => {
+    return typeof window !== 'undefined' && sessionStorage.getItem('queueless_google_redirect_in_progress') === '1';
+  });
   const [localError, setLocalError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isDomainError, setIsDomainError] = useState(false);
@@ -135,6 +138,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate, redirectTo = '
               : 'Enter your registered email and choose a new secure password.'}
           </p>
         </div>
+
+        {/* Mobile Redirect In-Progress Banner */}
+        {isRedirecting && (
+          <div className="p-3.5 rounded-xl bg-teal-50 border border-teal-200 text-center space-y-1.5 animate-pulse">
+            <div className="w-5 h-5 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-xs font-semibold text-teal-900">
+              Completing Google sign-in...
+            </p>
+            <p className="text-[11px] text-teal-700">Restoring your authenticated session.</p>
+          </div>
+        )}
 
         {/* Success Banner */}
         {successMessage && (

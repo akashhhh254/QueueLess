@@ -1,9 +1,20 @@
 /**
- * Universal error message extraction utility for QueueLess.
- * Extracts clean, human-readable strings from errors, objects, Firebase Auth codes,
- * API responses, and Axios/Fetch error shapes.
- * Guaranteed to NEVER return "[object Object]".
+ * Universal error normalization utility for QueueLess.
+ * Normalizes all error types (Error instances, Firebase Auth errors, API error envelopes,
+ * HTTP status codes, nested JSON, and string errors) into a standard, safe contract:
+ * {
+ *   message: string,
+ *   code?: string,
+ *   status?: number
+ * }
+ * GUARANTEED to never produce "[object Object]".
  */
+
+export interface NormalizedAppError {
+  message: string;
+  code?: string;
+  status?: number;
+}
 
 export function mapAuthErrorCode(code: string): string | null {
   const normalized = code.toLowerCase().trim();
@@ -37,57 +48,80 @@ export function mapAuthErrorCode(code: string): string | null {
   }
 }
 
-export function getErrorMessage(
+export function normalizeError(
   error: unknown,
   fallback = 'Registration could not be completed. Please try again.'
-): string {
+): NormalizedAppError {
   if (error === null || error === undefined) {
-    return fallback;
+    return { message: fallback };
   }
 
-  // 1. If it's a string
+  // 1. Primitive string error
   if (typeof error === 'string') {
     const trimmed = error.trim();
     if (!trimmed || trimmed === '[object Object]' || trimmed.toLowerCase() === 'object object') {
-      return fallback;
+      return { message: fallback };
     }
 
-    // Check for embedded Firebase auth codes (e.g. "Firebase: Error (auth/popup-blocked).")
     if (trimmed.includes('auth/')) {
       const match = trimmed.match(/auth\/[a-z0-9-]+/i);
       if (match) {
         const mapped = mapAuthErrorCode(match[0]);
-        if (mapped) return mapped;
+        if (mapped) return { message: mapped, code: match[0] };
       }
     }
 
-    // Clean up "Firebase: Error (...) " wrapper prefix if present
     const cleaned = trimmed.replace(/^Firebase:\s*Error\s*\((.*?)\)\.?/i, '$1').trim();
-    return cleaned || fallback;
+    return { message: cleaned || fallback };
   }
 
-  // 2. If it's an object / Error instance
+  // 2. Error object or API envelope
   if (typeof error === 'object') {
     const errObj = error as Record<string, any>;
+    let code: string | undefined = typeof errObj.code === 'string' ? errObj.code : undefined;
+    let status: number | undefined = typeof errObj.status === 'number' ? errObj.status : undefined;
 
-    // Priority 1: Direct error code mapping (FirebaseError)
-    if (typeof errObj.code === 'string') {
-      const mapped = mapAuthErrorCode(errObj.code);
-      if (mapped) return mapped;
+    // Check code mapping
+    if (code) {
+      const mapped = mapAuthErrorCode(code);
+      if (mapped) {
+        return { message: mapped, code, status };
+      }
     }
 
-    // Priority 2: Nested response data (API / Express / Fetch JSON responses)
+    // Check standardized backend response format: { success: false, error: { code, message } }
+    if (errObj.error && typeof errObj.error === 'object') {
+      const subError = errObj.error;
+      const subCode = typeof subError.code === 'string' ? subError.code : code;
+      const subMsg = typeof subError.message === 'string' ? subError.message.trim() : '';
+      if (subMsg && subMsg !== '[object Object]') {
+        return {
+          message: subMsg,
+          code: subCode,
+          status,
+        };
+      }
+    }
+
+    // Check Axios/Fetch response wrappers (e.g. error.response.data)
     if (errObj.response?.data) {
-      const msg = getErrorMessage(errObj.response.data, '');
-      if (msg && msg !== fallback) return msg;
+      const normalizedSub = normalizeError(errObj.response.data, fallback);
+      if (normalizedSub.message !== fallback) {
+        return {
+          ...normalizedSub,
+          status: status || (typeof errObj.response.status === 'number' ? errObj.response.status : undefined),
+        };
+      }
     }
 
     if (errObj.data) {
-      const msg = getErrorMessage(errObj.data, '');
-      if (msg && msg !== fallback) return msg;
+      const normalizedSub = normalizeError(errObj.data, fallback);
+      if (normalizedSub.message !== fallback) {
+        return normalizedSub;
+      }
     }
 
-    // Priority 3: err.message
+    // Check err.message
     if (errObj.message) {
       if (typeof errObj.message === 'string') {
         const trimmed = errObj.message.trim();
@@ -96,35 +130,38 @@ export function getErrorMessage(
             const match = trimmed.match(/auth\/[a-z0-9-]+/i);
             if (match) {
               const mapped = mapAuthErrorCode(match[0]);
-              if (mapped) return mapped;
+              if (mapped) return { message: mapped, code: match[0], status };
             }
           }
-          return trimmed.replace(/^Firebase:\s*Error\s*\((.*?)\)\.?/i, '$1').trim();
+          const cleaned = trimmed.replace(/^Firebase:\s*Error\s*\((.*?)\)\.?/i, '$1').trim();
+          return { message: cleaned || fallback, code, status };
         }
       } else if (typeof errObj.message === 'object') {
-        const msg = getErrorMessage(errObj.message, '');
-        if (msg && msg !== fallback) return msg;
+        const normalizedSub = normalizeError(errObj.message, fallback);
+        if (normalizedSub.message !== fallback) return normalizedSub;
       }
     }
 
-    // Priority 4: err.error
-    if (errObj.error) {
-      if (typeof errObj.error === 'string') {
-        const trimmed = errObj.error.trim();
-        if (trimmed && trimmed !== '[object Object]' && trimmed.toLowerCase() !== 'object object') {
-          return trimmed;
-        }
-      } else if (typeof errObj.error === 'object') {
-        const msg = getErrorMessage(errObj.error, '');
-        if (msg && msg !== fallback) return msg;
+    // Check err.error when it's a string
+    if (typeof errObj.error === 'string') {
+      const trimmed = errObj.error.trim();
+      if (trimmed && trimmed !== '[object Object]' && trimmed.toLowerCase() !== 'object object') {
+        return { message: trimmed, code, status };
       }
     }
 
-    // Priority 5: err.statusText
+    // Check err.statusText
     if (typeof errObj.statusText === 'string' && errObj.statusText.trim()) {
-      return errObj.statusText.trim();
+      return { message: errObj.statusText.trim(), code, status };
     }
   }
 
-  return fallback;
+  return { message: fallback };
+}
+
+export function getErrorMessage(
+  error: unknown,
+  fallback = 'Registration could not be completed. Please try again.'
+): string {
+  return normalizeError(error, fallback).message;
 }

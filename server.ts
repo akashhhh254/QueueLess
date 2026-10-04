@@ -58,8 +58,11 @@ async function startServer() {
     }
     const statusCode = typeof err.status === 'number' ? err.status : 500;
     res.status(statusCode).json({
-      error: err.name || 'Server Error',
-      message: err.message || 'An unexpected server error occurred.',
+      success: false,
+      error: {
+        code: err.code || err.name || 'SERVER_ERROR',
+        message: err.message || 'An unexpected server error occurred.',
+      },
     });
   });
 

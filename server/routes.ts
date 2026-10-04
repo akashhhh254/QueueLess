@@ -48,9 +48,9 @@ apiRouter.post('/auth/save-client-id', (req: AuthenticatedRequest, res: Response
 
 apiRouter.get('/auth/me', (req: AuthenticatedRequest, res: Response) => {
   if (!req.user) {
-    return res.json({ user: null });
+    return res.json({ success: true, authenticated: false, user: null });
   }
-  res.json({ user: req.user });
+  res.json({ success: true, authenticated: true, user: req.user });
 });
 
 apiRouter.post('/auth/register', async (req: AuthenticatedRequest, res: Response) => {
@@ -59,8 +59,11 @@ apiRouter.post('/auth/register', async (req: AuthenticatedRequest, res: Response
     const { name, email, password, role } = req.body || {};
     if (!name || !email || !password) {
       return res.status(400).json({
-        error: 'Registration Failed',
-        message: 'Full name, email address, and password are required.',
+        success: false,
+        error: {
+          code: 'MISSING_FIELDS',
+          message: 'Full name, email address, and password are required.',
+        },
       });
     }
 
@@ -86,10 +89,14 @@ apiRouter.post('/auth/register', async (req: AuthenticatedRequest, res: Response
       message: `Account created successfully! Welcome, ${user.name}.`,
     });
   } catch (err: any) {
-    const status = err.message?.includes('already exists') ? 409 : 400;
+    const isConflict = err.message?.includes('already exists');
+    const status = isConflict ? 409 : 400;
     return res.status(status).json({
-      error: 'Registration Failed',
-      message: err.message || 'Unable to complete registration.',
+      success: false,
+      error: {
+        code: isConflict ? 'USER_ALREADY_EXISTS' : 'REGISTRATION_FAILED',
+        message: err.message || 'Unable to complete registration.',
+      },
     });
   }
 });
@@ -100,8 +107,11 @@ const handleLoginRequest = async (req: AuthenticatedRequest, res: Response) => {
     const { email, password } = req.body || {};
     if (!email || !password) {
       return res.status(400).json({
-        error: 'Login Failed',
-        message: 'Please enter both your email address and password.',
+        success: false,
+        error: {
+          code: 'MISSING_CREDENTIALS',
+          message: 'Please enter both your email address and password.',
+        },
       });
     }
 
@@ -123,8 +133,11 @@ const handleLoginRequest = async (req: AuthenticatedRequest, res: Response) => {
     });
   } catch (err: any) {
     return res.status(401).json({
-      error: 'Login Failed',
-      message: err.message || 'Invalid email or password.',
+      success: false,
+      error: {
+        code: 'INVALID_CREDENTIALS',
+        message: err.message || 'Invalid email or password.',
+      },
     });
   }
 };
@@ -138,8 +151,11 @@ apiRouter.post('/auth/reset-password', async (req: AuthenticatedRequest, res: Re
     const { email, newPassword } = req.body || {};
     if (!email || !newPassword) {
       return res.status(400).json({
-        error: 'Password Reset Failed',
-        message: 'Please enter both email and your new password.',
+        success: false,
+        error: {
+          code: 'MISSING_FIELDS',
+          message: 'Please enter both email and your new password.',
+        },
       });
     }
 
@@ -161,8 +177,11 @@ apiRouter.post('/auth/reset-password', async (req: AuthenticatedRequest, res: Re
     });
   } catch (err: any) {
     return res.status(400).json({
-      error: 'Password Reset Failed',
-      message: err.message || 'Unable to reset password.',
+      success: false,
+      error: {
+        code: 'PASSWORD_RESET_FAILED',
+        message: err.message || 'Unable to reset password.',
+      },
     });
   }
 });
@@ -173,8 +192,11 @@ apiRouter.post('/auth/google', async (req: AuthenticatedRequest, res: Response) 
     const rawToken = credential || idToken || token;
     if (!rawToken || typeof rawToken !== 'string') {
       return res.status(400).json({
-        error: 'Google Authentication Failed',
-        message: 'Google identity token is required.',
+        success: false,
+        error: {
+          code: 'TOKEN_REQUIRED',
+          message: 'Google identity token is required.',
+        },
       });
     }
 
@@ -203,8 +225,11 @@ apiRouter.post('/auth/google', async (req: AuthenticatedRequest, res: Response) 
     });
   } catch (err: any) {
     res.status(401).json({
-      error: 'Google Authentication Failed',
-      message: err.message || 'Unable to verify Google credentials.',
+      success: false,
+      error: {
+        code: 'AUTHENTICATION_FAILED',
+        message: err.message || 'Google authentication could not be completed.',
+      },
     });
   }
 });

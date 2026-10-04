@@ -18,6 +18,9 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
   const [role, setRole] = useState<'CUSTOMER' | 'PROVIDER'>('CUSTOMER');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(() => {
+    return typeof window !== 'undefined' && sessionStorage.getItem('queueless_google_redirect_in_progress') === '1';
+  });
   const [localError, setLocalError] = useState<string | null>(null);
   const [isDomainError, setIsDomainError] = useState(false);
   const [copiedDomain, setCopiedDomain] = useState(false);
@@ -117,6 +120,17 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate, redirect
             Reserve your digital turn and manage real-time queues with a secure personal profile.
           </p>
         </div>
+
+        {/* Mobile Redirect In-Progress Banner */}
+        {isRedirecting && (
+          <div className="p-3.5 rounded-xl bg-teal-50 border border-teal-200 text-center space-y-1.5 animate-pulse">
+            <div className="w-5 h-5 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-xs font-semibold text-teal-900">
+              Completing Google registration...
+            </p>
+            <p className="text-[11px] text-teal-700">Establishing your authenticated session.</p>
+          </div>
+        )}
 
         {/* Domain Authorization Notice Banner */}
         {isDomainError && (
